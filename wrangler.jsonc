@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tokyo-ai-chat",
+  "compatibility_date": "2024-01-01",
+  "pages_build_output_dir": "./dist",
+  "compatibility_flags": ["nodejs_compat"]
+  
+  // 環境変数（Cloudflare Secrets で設定）:
+  // - TOKYO_AI_BEARER_TOKEN（オプション1）
+  // - TOKEN_SERVICE_URL（オプション2）
+  // - MICROSOFT_EMAIL（オプション2）
+  // - MICROSOFT_PASSWORD（オプション2）
+}

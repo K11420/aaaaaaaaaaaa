@@ -1,0 +1,14 @@
+# FastAPI フレームワーク
+fastapi==0.109.0
+
+# ASGI サーバー
+uvicorn[standard]==0.27.0
+
+# Playwright ブラウザ自動化
+playwright==1.41.0
+
+# 環境変数管理
+python-dotenv==1.0.0
+
+# データバリデーション
+pydantic==2.5.3
