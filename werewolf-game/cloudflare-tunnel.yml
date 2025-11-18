@@ -1,17 +1,9 @@
-tunnel: werewolf-game-tunnel
-credentials-file: /home/kbt0/.cloudflared/werewolf-tunnel.json
+tunnel: a2102b13-69b6-4ffa-99b3-61a07cf51851
+credentials-file: /home/kbt0/.cloudflared/a2102b13-69b6-4ffa-99b3-61a07cf51851.json
 
 ingress:
-  # クライアント（フロントエンド）
-  - hostname: werewolf-client.your-domain.com
-    service: http://localhost:3003
+  # すべてのリクエストをクライアント（フロントエンド）に転送
+  - service: http://localhost:3002
   
-  # サーバー（バックエンド/API）
-  - hostname: werewolf-api.your-domain.com
-    service: http://localhost:3001
-  
-  # キャッチオール
-  - service: http_status:404
-
 # ログレベル
 loglevel: info

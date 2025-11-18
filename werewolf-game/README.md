@@ -157,15 +157,28 @@ VITE_SOCKET_URL=http://your-server-url:3001
 
 ## 🌐 Cloudflare Tunnel
 
-Cloudflareトンネルを使用して、外部からアクセス可能にできます。
+Cloudflareトンネルを使用して、外部からアクセス可能です。
+
+### 🌍 公開URL
+**現在のトンネル**: https://cal-cement-easy-rock.trycloudflare.com
+
+このURLで世界中からゲームにアクセスできます！
 
 ### 起動方法
+
+**簡易トンネル（推奨）**
 ```bash
-# トンネルスクリプトを実行
+cd /home/kbt0/webapp
+./cloudflared tunnel --url http://localhost:3002
+```
+
+**名前付きトンネル**
+```bash
+cd werewolf-game
 ./start-tunnel.sh
 ```
 
-設定ファイル: `cloudflare-tunnel.yml`
+詳細: [CLOUDFLARE_TUNNEL.md](./CLOUDFLARE_TUNNEL.md)
 
 ## 📝 今後の改善予定
 
