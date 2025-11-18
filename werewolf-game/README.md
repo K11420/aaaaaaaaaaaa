@@ -24,10 +24,31 @@
 
 ## 🤖 CPUプレイヤー（AI）について
 
+### 基本機能
 - ホストがCPUプレイヤーを追加可能
 - CPUは自動で投票・夜アクションを実行
 - CPUは定期的にチャットで発言
 - 少人数でもゲームを楽しめる
+
+### 🌟 Gemini AI統合（新機能！）
+
+**デフォルトAI（APIキー未設定）**
+- シンプルなルールベースのロジック
+- ランダムな投票・アクション
+
+**Gemini AI（APIキー設定時）**
+- 🧠 自然で人間らしい発言
+- 🎯 状況を理解した戦略的判断
+- 🎭 役職に応じた適切な行動
+- 📊 ゲーム履歴を考慮した推理
+
+**設定方法**
+1. ホーム画面で「🤖 Gemini AI設定」セクションを見つける
+2. [Google AI Studio](https://makersuite.google.com/app/apikey)でAPIキーを取得（無料）
+3. APIキーを入力して「APIキーを設定」をクリック
+4. CPUプレイヤーが自動的にGemini AIを使用開始！
+
+詳細: [GEMINI_API_SETUP.md](./GEMINI_API_SETUP.md)
 
 ## 🛠️ 技術スタック
 
@@ -41,6 +62,7 @@
 - **Express** 4.18
 - **Socket.IO** 4.6
 - **CORS** 2.8
+- **Google Generative AI (Gemini)** 0.1.3 (オプション)
 
 ## 📦 インストール
 
@@ -133,9 +155,22 @@ npm run dev
 VITE_SOCKET_URL=http://your-server-url:3001
 ```
 
+## 🌐 Cloudflare Tunnel
+
+Cloudflareトンネルを使用して、外部からアクセス可能にできます。
+
+### 起動方法
+```bash
+# トンネルスクリプトを実行
+./start-tunnel.sh
+```
+
+設定ファイル: `cloudflare-tunnel.yml`
+
 ## 📝 今後の改善予定
 
-- [ ] より高度なCPU AI
+- [x] ~~より高度なCPU AI~~ ✅ Gemini AI統合完了！
+- [x] ~~Cloudflareトンネル対応~~ ✅ 完了！
 - [ ] 追加の役職（狂人、狩人など）
 - [ ] ゲームリプレイ機能
 - [ ] ユーザーアカウント機能

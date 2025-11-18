@@ -1,10 +1,72 @@
 // CPU AI ロジック
 
 const { ROLES, PHASES } = require('./gameLogic');
+const geminiAI = require('./geminiAI');
 
 class CPUPlayer {
   constructor(gameRoom) {
     this.gameRoom = gameRoom;
+  }
+
+  // Gemini AIを使った投票判断
+  async makeVoteDecisionWithAI(cpuPlayer) {
+    const alivePlayers = this.gameRoom.getAlivePlayers().filter(p => p.id !== cpuPlayer.id);
+    
+    if (alivePlayers.length === 0) return null;
+
+    try {
+      const context = {
+        cpuPlayer,
+        alivePlayers,
+        gameHistory: this.gameRoom.history,
+        day: this.gameRoom.day
+      };
+
+      const targetId = await geminiAI.makeVoteDecision(context);
+      return targetId || this.makeVoteDecision(cpuPlayer);
+    } catch (error) {
+      console.error('AI vote decision error:', error);
+      return this.makeVoteDecision(cpuPlayer);
+    }
+  }
+
+  // Gemini AIを使った夜アクション判断
+  async makeNightActionDecisionWithAI(cpuPlayer) {
+    const alivePlayers = this.gameRoom.getAlivePlayers().filter(p => p.id !== cpuPlayer.id);
+    
+    if (alivePlayers.length === 0) return null;
+
+    try {
+      const context = {
+        cpuPlayer,
+        alivePlayers,
+        role: cpuPlayer.role,
+        gameHistory: this.gameRoom.history,
+        day: this.gameRoom.day
+      };
+
+      const targetId = await geminiAI.makeNightActionDecision(context);
+      
+      if (targetId) {
+        const action = this.getActionForRole(cpuPlayer.role);
+        return { action, targetId };
+      }
+      
+      return this.makeNightActionDecision(cpuPlayer);
+    } catch (error) {
+      console.error('AI night action error:', error);
+      return this.makeNightActionDecision(cpuPlayer);
+    }
+  }
+
+  // 役職に応じたアクション名を取得
+  getActionForRole(role) {
+    const actions = {
+      [ROLES.WEREWOLF]: 'attack',
+      [ROLES.SEER]: 'divine',
+      [ROLES.KNIGHT]: 'protect'
+    };
+    return actions[role];
   }
 
   // CPUの投票判断
@@ -133,6 +195,25 @@ class CPUPlayer {
     const phaseStatements = statements[phase] || ['...'];
     return phaseStatements[Math.floor(Math.random() * phaseStatements.length)];
   }
+
+  // Gemini AIを使った発言生成
+  async generateStatementWithAI(cpuPlayer, phase) {
+    try {
+      const context = {
+        cpuPlayer,
+        phase,
+        day: this.gameRoom.day,
+        gameHistory: this.gameRoom.history,
+        alivePlayers: this.gameRoom.getAlivePlayers()
+      };
+
+      const message = await geminiAI.generateChatMessage(context);
+      return message || this.generateStatement(cpuPlayer, phase);
+    } catch (error) {
+      console.error('AI statement generation error:', error);
+      return this.generateStatement(cpuPlayer, phase);
+    }
+  }
 }
 
 // CPUの自動アクション実行
@@ -145,7 +226,11 @@ async function executeCPUActions(gameRoom, io) {
     await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
 
     if (gameRoom.phase === PHASES.VOTING) {
-      const targetId = cpuAI.makeVoteDecision(cpu);
+      // Gemini AIを使用（利用可能な場合）
+      const targetId = geminiAI.isInitialized() 
+        ? await cpuAI.makeVoteDecisionWithAI(cpu)
+        : cpuAI.makeVoteDecision(cpu);
+      
       if (targetId) {
         gameRoom.castVote(cpu.id, targetId);
         io.to(gameRoom.roomId).emit('vote-cast', {
@@ -154,7 +239,11 @@ async function executeCPUActions(gameRoom, io) {
         });
       }
     } else if (gameRoom.phase === PHASES.NIGHT) {
-      const action = cpuAI.makeNightActionDecision(cpu);
+      // Gemini AIを使用（利用可能な場合）
+      const action = geminiAI.isInitialized()
+        ? await cpuAI.makeNightActionDecisionWithAI(cpu)
+        : cpuAI.makeNightActionDecision(cpu);
+      
       if (action) {
         gameRoom.submitNightAction(cpu.id, action.action, action.targetId);
       }
@@ -181,14 +270,35 @@ function startCPUChat(gameRoom, io) {
     // ランダムにCPUを選んで発言させる
     if (Math.random() < 0.3) { // 30%の確率で発言
       const cpu = aliveCPUs[Math.floor(Math.random() * aliveCPUs.length)];
-      const statement = cpuAI.generateStatement(cpu, gameRoom.phase);
       
-      io.to(gameRoom.roomId).emit('chat-message', {
-        playerId: cpu.id,
-        playerName: cpu.name,
-        message: statement,
-        isCPU: true
-      });
+      // Gemini AIを使用（利用可能な場合）
+      if (geminiAI.isInitialized()) {
+        cpuAI.generateStatementWithAI(cpu, gameRoom.phase).then(statement => {
+          io.to(gameRoom.roomId).emit('chat-message', {
+            playerId: cpu.id,
+            playerName: cpu.name,
+            message: statement,
+            isCPU: true
+          });
+        }).catch(error => {
+          console.error('AI chat error:', error);
+          const statement = cpuAI.generateStatement(cpu, gameRoom.phase);
+          io.to(gameRoom.roomId).emit('chat-message', {
+            playerId: cpu.id,
+            playerName: cpu.name,
+            message: statement,
+            isCPU: true
+          });
+        });
+      } else {
+        const statement = cpuAI.generateStatement(cpu, gameRoom.phase);
+        io.to(gameRoom.roomId).emit('chat-message', {
+          playerId: cpu.id,
+          playerName: cpu.name,
+          message: statement,
+          isCPU: true
+        });
+      }
     }
   }, 5000); // 5秒ごとにチェック
 

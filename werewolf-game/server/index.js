@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const { GameRoom, PHASES } = require('./gameLogic');
 const { executeCPUActions, startCPUChat } = require('./cpuAI');
+const geminiAI = require('./geminiAI');
 
 const app = express();
 const server = http.createServer(app);
@@ -50,6 +51,44 @@ app.get('/api/rooms', (req, res) => {
     }
   }
   res.json({ rooms });
+});
+
+// Gemini APIキーの設定
+app.post('/api/gemini/set-api-key', (req, res) => {
+  try {
+    const { apiKey } = req.body;
+    
+    if (!apiKey || apiKey.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'APIキーが必要です'
+      });
+    }
+
+    geminiAI.setApiKey(apiKey.trim());
+    
+    res.json({
+      success: true,
+      message: 'Gemini APIキーが設定されました',
+      isInitialized: geminiAI.isInitialized()
+    });
+  } catch (error) {
+    console.error('API key setup error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'APIキーの設定に失敗しました'
+    });
+  }
+});
+
+// Gemini APIの状態確認
+app.get('/api/gemini/status', (req, res) => {
+  res.json({
+    isInitialized: geminiAI.isInitialized(),
+    message: geminiAI.isInitialized() 
+      ? 'Gemini APIは有効です' 
+      : 'Gemini APIキーが設定されていません（デフォルトのAIを使用）'
+  });
 });
 
 // Socket.IO接続

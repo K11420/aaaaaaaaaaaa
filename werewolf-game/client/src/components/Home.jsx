@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import ApiKeySettings from './ApiKeySettings';
 
 function Home({ onJoinRoom, onCreateRoom }) {
   const [playerName, setPlayerName] = useState('');
@@ -33,6 +34,8 @@ function Home({ onJoinRoom, onCreateRoom }) {
       <h1 style={{ textAlign: 'center', marginBottom: '40px', fontSize: '48px' }}>
         🐺 人狼ゲーム
       </h1>
+
+      <ApiKeySettings />
 
       {!showCreateForm ? (
         <div>
