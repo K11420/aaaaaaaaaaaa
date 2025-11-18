@@ -37,7 +37,11 @@ function App() {
 
   const handleCreateRoom = async (playerName, settings) => {
     try {
-      const apiUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
+      // Cloudflare経由の場合は相対パス
+      const apiUrl = window.location.origin.includes('trycloudflare.com') 
+        ? ''  // 相対パス（プロキシ経由）
+        : (import.meta.env.VITE_SOCKET_URL || 'http://localhost:4096');
+      
       const response = await fetch(`${apiUrl}/api/rooms/create`, {
         method: 'POST',
         headers: {
@@ -54,7 +58,7 @@ function App() {
       }
     } catch (error) {
       console.error('Failed to create room:', error);
-      alert('ルームの作成に失敗しました');
+      alert('ルームの作成に失敗しました: ' + error.message);
     }
   };
 

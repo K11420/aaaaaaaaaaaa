@@ -11,6 +11,17 @@ export default defineConfig({
       '.trycloudflare.com',
       'localhost',
       '106.73.68.66'
-    ]
+    ],
+    proxy: {
+      '/api': {
+        target: 'http://localhost:4096',
+        changeOrigin: true
+      },
+      '/socket.io': {
+        target: 'http://localhost:4096',
+        changeOrigin: true,
+        ws: true
+      }
+    }
   }
 });

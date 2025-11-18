@@ -13,7 +13,11 @@ function ApiKeySettings() {
 
   const checkApiStatus = async () => {
     try {
-      const apiUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
+      // Cloudflare経由の場合は相対パス
+      const apiUrl = window.location.origin.includes('trycloudflare.com')
+        ? ''  // 相対パス（プロキシ経由）
+        : (import.meta.env.VITE_SOCKET_URL || 'http://localhost:4096');
+      
       const response = await fetch(`${apiUrl}/api/gemini/status`);
       const data = await response.json();
       
@@ -37,7 +41,11 @@ function ApiKeySettings() {
     setMessage('');
 
     try {
-      const apiUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
+      // Cloudflare経由の場合は相対パス
+      const apiUrl = window.location.origin.includes('trycloudflare.com')
+        ? ''  // 相対パス（プロキシ経由）
+        : (import.meta.env.VITE_SOCKET_URL || 'http://localhost:4096');
+      
       const response = await fetch(`${apiUrl}/api/gemini/set-api-key`, {
         method: 'POST',
         headers: {
