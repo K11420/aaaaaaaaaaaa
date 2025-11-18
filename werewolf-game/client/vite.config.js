@@ -7,7 +7,7 @@ export default defineConfig({
     port: 3000,
     host: '0.0.0.0',
     allowedHosts: [
-      'cal-cement-easy-rock.trycloudflare.com',
+      'discretion-reaction-hire-elimination.trycloudflare.com',
       '.trycloudflare.com',
       'localhost',
       '106.73.68.66'
