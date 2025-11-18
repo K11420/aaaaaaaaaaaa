@@ -492,7 +492,7 @@ function getRoleInfo(role) {
   return roleInfoMap[role];
 }
 
-const PORT = process.env.PORT || 4097;
+const PORT = process.env.PORT || 4096;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Werewolf server running on port ${PORT}`);
 });
