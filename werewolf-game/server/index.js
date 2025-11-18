@@ -11,12 +11,22 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST']
-  }
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  transports: ['websocket', 'polling'],
+  allowEIO3: true,
+  path: '/socket.io/'
 });
 
 app.use(cors());
 app.use(express.json());
+
+// デバッグ用ログ
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
 
 // ゲームルームの管理
 const gameRooms = new Map();
@@ -93,23 +103,27 @@ app.get('/api/gemini/status', (req, res) => {
 
 // Socket.IO接続
 io.on('connection', (socket) => {
-  console.log(`Player connected: ${socket.id}`);
+  console.log(`✅ Player connected: ${socket.id}`);
 
   // ルームに参加
   socket.on('join-room', ({ roomId, playerName }) => {
+    console.log(`📥 Join room request: ${playerName} -> ${roomId}`);
     const gameRoom = gameRooms.get(roomId);
     
     if (!gameRoom) {
+      console.log(`❌ Room not found: ${roomId}`);
       socket.emit('error', { message: 'ルームが見つかりません' });
       return;
     }
 
     if (gameRoom.phase !== PHASES.WAITING) {
+      console.log(`❌ Game already started in room: ${roomId}`);
       socket.emit('error', { message: 'ゲームが既に開始されています' });
       return;
     }
 
     const result = gameRoom.addPlayer(socket.id, playerName, gameRoom.players.size === 0);
+    console.log(`👤 Add player result:`, result);
     
     if (!result.success) {
       socket.emit('error', { message: result.error });

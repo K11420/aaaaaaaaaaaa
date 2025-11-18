@@ -31,6 +31,8 @@ function App() {
   }, []);
 
   const handleJoinRoom = (roomId, playerName) => {
+    console.log('🚪 Attempting to join room:', roomId, 'as', playerName);
+    console.log('Socket connected:', socket.connected);
     setPlayerName(playerName);
     socket.emit('join-room', { roomId, playerName });
   };
