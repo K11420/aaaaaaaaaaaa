@@ -34,7 +34,18 @@ function App() {
     console.log('🚪 Attempting to join room:', roomId, 'as', playerName);
     console.log('Socket connected:', socket.connected);
     setPlayerName(playerName);
-    socket.emit('join-room', { roomId, playerName });
+    
+    // Socket接続を確認してから参加
+    if (!socket.connected) {
+      console.log('⏳ Socket not connected, waiting for connection...');
+      socket.once('connect', () => {
+        console.log('✅ Socket connected, now joining room');
+        socket.emit('join-room', { roomId, playerName });
+      });
+      connectSocket();
+    } else {
+      socket.emit('join-room', { roomId, playerName });
+    }
   };
 
   const handleCreateRoom = async (playerName, settings) => {
@@ -56,7 +67,18 @@ function App() {
       
       if (data.success) {
         setPlayerName(playerName);
-        socket.emit('join-room', { roomId: data.roomId, playerName });
+        
+        // Socket接続を確認してから参加
+        if (!socket.connected) {
+          console.log('⏳ Socket not connected, waiting for connection...');
+          socket.once('connect', () => {
+            console.log('✅ Socket connected, now joining created room');
+            socket.emit('join-room', { roomId: data.roomId, playerName });
+          });
+          connectSocket();
+        } else {
+          socket.emit('join-room', { roomId: data.roomId, playerName });
+        }
       }
     } catch (error) {
       console.error('Failed to create room:', error);
