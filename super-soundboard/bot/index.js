@@ -198,7 +198,11 @@ const commands = [
     .addAttachmentOption(option =>
       option.setName('file')
         .setDescription('音声ファイル (MP3, WAV, OGG, M4A)')
-        .setRequired(true)),
+        .setRequired(true))
+    .addStringOption(option =>
+      option.setName('description')
+        .setDescription('サウンドの説明（どんな音が流れるか）')
+        .setRequired(false)),
   new SlashCommandBuilder()
     .setName('delete')
     .setDescription('登録したサウンドを削除します')
@@ -209,16 +213,28 @@ const commands = [
         .setAutocomplete(true)),
   new SlashCommandBuilder()
     .setName('edit')
-    .setDescription('登録したサウンドのキーワードを変更します')
+    .setDescription('登録したサウンドのキーワードや説明を変更します')
     .addStringOption(option =>
-      option.setName('old_keyword')
-        .setDescription('現在のキーワード')
+      option.setName('keyword')
+        .setDescription('編集するサウンドのキーワード')
         .setRequired(true)
         .setAutocomplete(true))
     .addStringOption(option =>
       option.setName('new_keyword')
-        .setDescription('新しいキーワード')
-        .setRequired(true)),
+        .setDescription('新しいキーワード（変更しない場合は空欄）')
+        .setRequired(false))
+    .addStringOption(option =>
+      option.setName('description')
+        .setDescription('新しい説明文（変更しない場合は空欄）')
+        .setRequired(false)),
+  new SlashCommandBuilder()
+    .setName('info')
+    .setDescription('サウンドの詳細情報を表示します')
+    .addStringOption(option =>
+      option.setName('keyword')
+        .setDescription('確認するサウンドのキーワード')
+        .setRequired(true)
+        .setAutocomplete(true)),
   new SlashCommandBuilder()
     .setName('play')
     .setDescription('サウンドを手動で再生します')
@@ -1249,11 +1265,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       case 'sounds': {
         const customList = Object.entries(customSounds)
-          .map(([keyword, data]) => `• **${keyword}** (by ${data.addedBy})`)
+          .map(([keyword, data]) => {
+            const desc = data.description ? ` - ${data.description}` : '';
+            return `• **${keyword}**${desc}`;
+          })
           .join('\n') || 'カスタムサウンドはまだ登録されていません';
         
         const embed = {
           title: '🎵 登録済みサウンド',
+          description: '説明文がないサウンドは `/edit` で追加できます',
           fields: [
             {
               name: `カスタムサウンド (${Object.keys(customSounds).length}件)`,
@@ -1269,6 +1289,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'add': {
         const keyword = interaction.options.getString('keyword');
         const attachment = interaction.options.getAttachment('file');
+        const description = interaction.options.getString('description');
         
         const validExtensions = ['.mp3', '.wav', '.ogg', '.m4a'];
         const ext = attachment.name.toLowerCase().slice(attachment.name.lastIndexOf('.'));
@@ -1290,13 +1311,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           customSounds[keyword] = {
             file: filename,
+            description: description || null,
             addedBy: interaction.user.tag,
             addedAt: new Date().toISOString()
           };
           saveCustomSounds(customSounds);
 
-          console.log(`✅ New sound registered: "${keyword}" -> ${filename}`);
-          await interaction.editReply(`✅ サウンドを登録しました！\nキーワード: **${keyword}**\nボイスチャンネルで「${keyword}」と言うと再生されます🔊`);
+          const descText = description ? `\n説明: ${description}` : '';
+          console.log(`✅ New sound registered: "${keyword}" -> ${filename}${description ? ` (${description})` : ''}`);
+          await interaction.editReply(`✅ サウンドを登録しました！\nキーワード: **${keyword}**${descText}\nボイスチャンネルで「${keyword}」と言うと再生されます🔊`);
         } catch (error) {
           console.error('Failed to save sound:', error);
           await interaction.editReply('❌ サウンドの保存に失敗しました');
@@ -1320,30 +1343,98 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       case 'edit': {
-        const oldKeyword = interaction.options.getString('old_keyword');
+        const keyword = interaction.options.getString('keyword');
         const newKeyword = interaction.options.getString('new_keyword');
+        const newDescription = interaction.options.getString('description');
         
-        if (!customSounds[oldKeyword]) {
-          await interaction.reply({ content: `❌ サウンド「${oldKeyword}」は見つかりませんでした`, ephemeral: true });
+        if (!customSounds[keyword]) {
+          await interaction.reply({ content: `❌ サウンド「${keyword}」は見つかりませんでした`, ephemeral: true });
           return;
         }
         
-        if (customSounds[newKeyword]) {
+        // 何も変更しない場合
+        if (!newKeyword && newDescription === null) {
+          await interaction.reply({ content: '❌ 新しいキーワードまたは説明文を指定してください', ephemeral: true });
+          return;
+        }
+        
+        // 新しいキーワードが既に存在する場合
+        if (newKeyword && newKeyword !== keyword && customSounds[newKeyword]) {
           await interaction.reply({ content: `❌ キーワード「${newKeyword}」は既に使用されています`, ephemeral: true });
           return;
         }
         
-        // キーワードを変更（ファイルはそのまま）
-        customSounds[newKeyword] = {
-          ...customSounds[oldKeyword],
-          editedBy: interaction.user.tag,
-          editedAt: new Date().toISOString()
-        };
-        delete customSounds[oldKeyword];
+        const changes = [];
+        
+        // 説明文を更新
+        if (newDescription !== null) {
+          customSounds[keyword].description = newDescription || null;
+          changes.push(newDescription ? `説明: ${newDescription}` : '説明を削除');
+        }
+        
+        // キーワードを変更
+        if (newKeyword && newKeyword !== keyword) {
+          customSounds[newKeyword] = {
+            ...customSounds[keyword],
+            editedBy: interaction.user.tag,
+            editedAt: new Date().toISOString()
+          };
+          delete customSounds[keyword];
+          changes.push(`キーワード: 「${keyword}」→「${newKeyword}」`);
+        } else {
+          customSounds[keyword].editedBy = interaction.user.tag;
+          customSounds[keyword].editedAt = new Date().toISOString();
+        }
+        
         saveCustomSounds(customSounds);
         
-        console.log(`✏️ Sound keyword edited: "${oldKeyword}" -> "${newKeyword}"`);
-        await interaction.reply(`✅ キーワードを変更しました！\n「${oldKeyword}」→「${newKeyword}」`);
+        console.log(`✏️ Sound edited: "${keyword}" - ${changes.join(', ')}`);
+        await interaction.reply(`✅ サウンドを編集しました！\n${changes.join('\n')}`);
+        break;
+      }
+
+      case 'info': {
+        const keyword = interaction.options.getString('keyword');
+        
+        if (!customSounds[keyword]) {
+          await interaction.reply({ content: `❌ サウンド「${keyword}」は見つかりませんでした`, ephemeral: true });
+          return;
+        }
+        
+        const data = customSounds[keyword];
+        const addedDate = new Date(data.addedAt).toLocaleDateString('ja-JP');
+        
+        const embed = {
+          title: `🔊 ${keyword}`,
+          fields: [
+            {
+              name: '📝 説明',
+              value: data.description || '_説明なし（`/edit` で追加できます）_'
+            },
+            {
+              name: '👤 登録者',
+              value: data.addedBy,
+              inline: true
+            },
+            {
+              name: '📅 登録日',
+              value: addedDate,
+              inline: true
+            }
+          ],
+          color: 0x5865F2
+        };
+        
+        if (data.editedBy) {
+          const editedDate = new Date(data.editedAt).toLocaleDateString('ja-JP');
+          embed.fields.push({
+            name: '✏️ 最終編集',
+            value: `${data.editedBy} (${editedDate})`,
+            inline: true
+          });
+        }
+        
+        await interaction.reply({ embeds: [embed] });
         break;
       }
 
@@ -1508,12 +1599,14 @@ client.on(Events.MessageCreate, async (message) => {
 
   const content = message.content.trim();
 
-  // サウンド登録: トリガ:キーワード + ファイル添付
+  // サウンド登録: トリガ:キーワード または トリガ:キーワード:説明文 + ファイル添付
   if (content.startsWith('トリガ:') || content.startsWith('トリガ：')) {
-    const keyword = content.replace(/^トリガ[:：]/, '').trim();
+    const parts = content.replace(/^トリガ[:：]/, '').trim().split(/[:：]/);
+    const keyword = parts[0]?.trim();
+    const description = parts[1]?.trim() || null;
     
     if (!keyword) {
-      return message.reply('❌ キーワードを指定してください\n例: `トリガ:やったー`');
+      return message.reply('❌ キーワードを指定してください\n例: `トリガ:やったー` または `トリガ:やったー:歓声が流れる`');
     }
 
     if (message.attachments.size === 0) {
@@ -1540,13 +1633,15 @@ client.on(Events.MessageCreate, async (message) => {
       // カスタムサウンドに登録
       customSounds[keyword] = {
         file: filename,
+        description: description,
         addedBy: message.author.tag,
         addedAt: new Date().toISOString()
       };
       saveCustomSounds(customSounds);
 
-      console.log(`✅ New sound registered: "${keyword}" -> ${filename}`);
-      message.reply(`✅ サウンドを登録しました！\nキーワード: **${keyword}**\nボイスチャンネルで「${keyword}」と言うと再生されます🔊`);
+      const descText = description ? `\n説明: ${description}` : '';
+      console.log(`✅ New sound registered: "${keyword}" -> ${filename}${description ? ` (${description})` : ''}`);
+      message.reply(`✅ サウンドを登録しました！\nキーワード: **${keyword}**${descText}\nボイスチャンネルで「${keyword}」と言うと再生されます🔊`);
     } catch (error) {
       console.error('Failed to save sound:', error);
       message.reply('❌ サウンドの保存に失敗しました');
@@ -1556,10 +1651,37 @@ client.on(Events.MessageCreate, async (message) => {
 
   // コマンド
   if (content === '!sounds' || content === '!サウンド') {
-    const presetList = Object.keys(presetSounds).slice(0, 10).join(', ');
-    const customList = Object.keys(customSounds).join(', ') || 'なし';
+    const customList = Object.entries(customSounds)
+      .map(([keyword, data]) => {
+        const desc = data.description ? ` - ${data.description}` : '';
+        return `• **${keyword}**${desc}`;
+      })
+      .join('\n') || 'なし';
     
-    message.reply(`🎵 **登録済みサウンド**\n\n**プリセット:** ${presetList}...\n**カスタム:** ${customList}`);
+    message.reply(`🎵 **登録済みサウンド** (${Object.keys(customSounds).length}件)\n\n${customList}`);
+    return;
+  }
+
+  // サウンド情報確認: !info キーワード
+  if (content.startsWith('!info ')) {
+    const keyword = content.replace(/^!info\s+/, '').trim();
+    
+    if (!customSounds[keyword]) {
+      message.reply(`❌ サウンド「${keyword}」は見つかりませんでした`);
+      return;
+    }
+    
+    const data = customSounds[keyword];
+    const desc = data.description || '（説明なし）';
+    const addedDate = new Date(data.addedAt).toLocaleDateString('ja-JP');
+    
+    let reply = `🔊 **${keyword}**\n📝 ${desc}\n👤 登録者: ${data.addedBy}\n📅 登録日: ${addedDate}`;
+    if (data.editedBy) {
+      const editedDate = new Date(data.editedAt).toLocaleDateString('ja-JP');
+      reply += `\n✏️ 編集: ${data.editedBy} (${editedDate})`;
+    }
+    
+    message.reply(reply);
     return;
   }
 
@@ -1637,14 +1759,17 @@ client.on(Events.MessageCreate, async (message) => {
 • \`/join\` - ボイスチャンネルに参加
 • \`/leave\` - ボイスチャンネルから退出
 • \`/sounds\` - 登録済みサウンド一覧
-• \`/add\` - サウンドを追加
-• \`/edit\` - キーワードを編集
+• \`/add\` - サウンドを追加（説明文付き可）
+• \`/edit\` - キーワードや説明を編集
+• \`/info\` - サウンドの詳細を確認
 • \`/delete\` - サウンドを削除
 • \`/play\` - サウンドを手動再生
 
 **テキストコマンド（従来互換）:**
-• \`トリガ:キーワード\` + 音声ファイル添付
-• \`!edit 旧キーワード 新キーワード\` - キーワード編集
+• \`トリガ:キーワード\` + ファイル添付
+• \`トリガ:キーワード:説明文\` + ファイル添付
+• \`!info キーワード\` - サウンドの詳細
+• \`!edit 旧 新\` - キーワード編集
 • \`!delete キーワード\` - サウンド削除
 • \`!sounds\`, \`!join\`, \`!leave\`
 
