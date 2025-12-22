@@ -230,6 +230,12 @@ const commands = [
   new SlashCommandBuilder()
     .setName('help')
     .setDescription('使い方を表示します'),
+  new SlashCommandBuilder()
+    .setName('debug')
+    .setDescription('音声認識のデバッグ情報を表示します'),
+  new SlashCommandBuilder()
+    .setName('test')
+    .setDescription('音声認識をテストします（5秒間マイクを監視）'),
 ].map(command => command.toJSON());
 
 // スラッシュコマンドを登録する関数
@@ -575,21 +581,42 @@ function startListening(guildId) {
   guildData.isListening = true;
 
   receiver.speaking.on('start', (userId) => {
-    // 既にストリーム処理中ならスキップ
-    if (guildData.userStreams.has(userId)) return;
+    // ユーザー名を取得
+    const guild = client.guilds.cache.get(guildId);
+    const member = guild?.members.cache.get(userId);
+    const userName = member?.displayName || member?.user?.username || userId;
     
-    console.log(`🎤 [Server:${guildId}] User ${userId} started speaking`);
+    // 既にストリーム処理中の場合
+    if (guildData.userStreams.has(userId)) {
+      // 前のストリームが古い場合は強制終了して再開
+      const existingStream = guildData.userStreams.get(userId);
+      const streamAge = Date.now() - (existingStream.startTime || 0);
+      if (streamAge > 10000) { // 10秒以上経過していたら古いストリームを終了
+        console.log(`🔄 [${userName}] 古いストリームを終了して再開`);
+        try {
+          if (existingStream.ffmpeg) existingStream.ffmpeg.kill();
+          if (existingStream.vosk) existingStream.vosk.kill();
+          if (existingStream.audioStream) existingStream.audioStream.destroy();
+        } catch (e) {}
+        guildData.userStreams.delete(userId);
+      } else {
+        console.log(`⏭️ [${userName}] 既に処理中（${Math.round(streamAge/1000)}秒経過）`);
+        return;
+      }
+    }
+    
+    console.log(`🎤 [${userName}] 発話開始`);
     
     let audioStream;
     try {
       audioStream = receiver.subscribe(userId, {
         end: {
           behavior: EndBehaviorType.AfterSilence,
-          duration: 500,  // 500msの無音で終了（高速化）
+          duration: 800,  // 800msの無音で終了（少し長めに）
         },
       });
     } catch (e) {
-      console.log(`⚠️ Failed to subscribe to user ${userId}`);
+      console.log(`⚠️ [${userName}] ストリームの取得に失敗: ${e.message}`);
       return;
     }
 
@@ -600,8 +627,15 @@ function startListening(guildId) {
       frameSize: 960 
     });
     
-    decoder.on('error', () => {});
-    audioStream.on('error', () => {});
+    // デコーダーエラーをログ
+    decoder.on('error', (err) => {
+      console.log(`⚠️ [${userName}] デコーダーエラー: ${err.message}`);
+    });
+    
+    // ストリームエラーをログ
+    audioStream.on('error', (err) => {
+      console.log(`⚠️ [${userName}] ストリームエラー: ${err.message}`);
+    });
 
     if (STT_ENGINE === 'google') {
       // === Google Cloud Speech-to-Text Streaming ===
@@ -721,17 +755,22 @@ function startGoogleSpeechRecognition(userId, audioStream, decoder, userStreams,
 
 // Vosk リアルタイム認識（高速版）
 function startVoskRecognition(userId, audioStream, decoder, userStreams, guildId) {
-  // ffmpeg: 48kHz stereo -> 16kHz mono PCM（高速オプション）
+  // ユーザー名を取得
+  const guild = client.guilds.cache.get(guildId);
+  const member = guild?.members.cache.get(userId);
+  const userName = member?.displayName || member?.user?.username || userId;
+  
+  // ffmpeg: 48kHz stereo -> 16kHz mono PCM（音量正規化付き）
   const ffmpeg = spawn('ffmpeg', [
-    '-hide_banner', '-loglevel', 'quiet',
+    '-hide_banner', '-loglevel', 'error',  // エラーは表示
     '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0',
-    '-af', 'pan=mono|c0=0.5*c0+0.5*c1',  // 高速なモノラル変換
+    '-af', 'pan=mono|c0=0.5*c0+0.5*c1,volume=2.0,highpass=f=100,lowpass=f=8000',  // 音量2倍 + ノイズフィルタ
     '-ar', '16000',
     '-f', 's16le',
     '-fflags', 'nobuffer',  // バッファリング無効
     '-flags', 'low_delay',  // 低遅延モード
     'pipe:1'
-  ], { stdio: ['pipe', 'pipe', 'ignore'] });
+  ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
   // Vosk認識プロセス
   const voskScript = join(__dirname, 'vosk_transcribe.py');
@@ -743,9 +782,28 @@ function startVoskRecognition(userId, audioStream, decoder, userStreams, guildId
   let lastPartial = '';
   let lastPartialTime = 0;
   let triggeredKeywords = new Set();  // 既にトリガーしたキーワード（重複防止）
+  let hasReceivedData = false;  // データ受信フラグ
+  let totalBytes = 0;  // 受信バイト数
 
-  ffmpeg.on('error', () => {});
-  vosk.on('error', (err) => console.error('Vosk error:', err));
+  ffmpeg.on('error', (err) => {
+    console.log(`⚠️ [${userName}] ffmpegエラー: ${err.message}`);
+  });
+  
+  ffmpeg.stderr.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg) console.log(`⚠️ [${userName}] ffmpeg: ${msg}`);
+  });
+  
+  vosk.on('error', (err) => console.error(`⚠️ [${userName}] Voskエラー:`, err));
+  
+  // ffmpegからのデータを監視
+  ffmpeg.stdout.on('data', (chunk) => {
+    if (!hasReceivedData) {
+      hasReceivedData = true;
+      console.log(`📊 [${userName}] 音声データ受信開始`);
+    }
+    totalBytes += chunk.length;
+  });
   
   vosk.stdout.on('data', (data) => {
     const lines = data.toString().trim().split('\n');
@@ -753,21 +811,21 @@ function startVoskRecognition(userId, audioStream, decoder, userStreams, guildId
       try {
         const result = JSON.parse(line);
         if (result.type === 'final' && result.text) {
-          console.log(`\n📝 [Server:${guildId}] Vosk: "${result.text}"`);
+          console.log(`\n📝 [${userName}] 認識結果: "${result.text}"`);
           handleRecognitionResult(result.text, guildId);
           lastPartial = '';
           triggeredKeywords.clear();  // 発話終了でリセット
         } else if (result.type === 'partial' && result.text) {
           const now = Date.now();
           if (result.text !== lastPartial && now - lastPartialTime > 100) {
-            process.stdout.write(`\r🎙️ "${result.text}"...          `);
+            process.stdout.write(`\r🎙️ [${userName}] "${result.text}"...          `);
             lastPartial = result.text;
             lastPartialTime = now;
             
             // 🚀 部分結果でもキーワード検出（超高速トリガー）
             const soundFile = getSoundFile(result.text);
             if (soundFile && !triggeredKeywords.has(soundFile)) {
-              console.log(`\n⚡ [Server:${guildId}] 即時トリガー: "${result.text}" -> ${soundFile}`);
+              console.log(`\n⚡ [${userName}] 即時トリガー: "${result.text}" -> ${soundFile}`);
               playSound(soundFile, 'discord_voice_instant', guildId);
               triggeredKeywords.add(soundFile);  // 重複防止
             }
@@ -779,8 +837,8 @@ function startVoskRecognition(userId, audioStream, decoder, userStreams, guildId
 
   vosk.stderr.on('data', (data) => {
     const msg = data.toString();
-    if (!msg.includes('LOG') && !msg.includes('vosk')) {
-      console.error('Vosk:', msg);
+    if (!msg.includes('LOG') && !msg.includes('vosk') && !msg.includes('Model')) {
+      console.error(`⚠️ [${userName}] Vosk:`, msg);
     }
   });
 
@@ -788,17 +846,32 @@ function startVoskRecognition(userId, audioStream, decoder, userStreams, guildId
   audioStream.pipe(decoder).pipe(ffmpeg.stdin);
   ffmpeg.stdout.pipe(vosk.stdin);
 
-  userStreams.set(userId, { audioStream, decoder, ffmpeg, vosk });
+  userStreams.set(userId, { 
+    audioStream, 
+    decoder, 
+    ffmpeg, 
+    vosk, 
+    userName,
+    startTime: Date.now()  // 開始時刻を記録
+  });
 
   audioStream.on('end', () => {
-    console.log(`\n🎤 [Server:${guildId}] User ${userId} stopped speaking`);
     const streams = userStreams.get(userId);
+    const duration = streams ? Math.round((Date.now() - streams.startTime) / 1000) : 0;
+    const dataInfo = hasReceivedData ? `${Math.round(totalBytes/1024)}KB` : '受信なし';
+    console.log(`\n🎤 [${userName}] 発話終了 (${duration}秒, ${dataInfo})`);
+    
     if (streams) {
       try {
         streams.ffmpeg.stdin.end();
         streams.vosk.stdin.end();
       } catch (e) {}
       userStreams.delete(userId);
+    }
+    
+    // データを受信していない場合は警告
+    if (!hasReceivedData) {
+      console.log(`⚠️ [${userName}] 音声データを受信できませんでした。マイク設定を確認してください。`);
     }
   });
 }
@@ -1316,6 +1389,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
               value: '`/play` - サウンドを手動再生\n`/join` - VCに参加\n`/leave` - VCから退出'
             },
             {
+              name: '🔧 デバッグ',
+              value: '`/debug` - 音声認識の状態を確認\n`/test` - マイクテスト'
+            },
+            {
               name: '💡 テキストコマンド（従来互換）',
               value: '`トリガ:キーワード` + ファイル添付\n`!sounds`, `!delete`, `!join`, `!leave`'
             }
@@ -1323,6 +1400,94 @@ client.on(Events.InteractionCreate, async (interaction) => {
           color: 0x5865F2
         };
         await interaction.reply({ embeds: [embed] });
+        break;
+      }
+
+      case 'debug': {
+        const guildData = guildConnections.get(interaction.guild.id);
+        const voiceChannel = interaction.member?.voice?.channel;
+        
+        const vcMembers = voiceChannel 
+          ? voiceChannel.members.filter(m => !m.user.bot).map(m => m.displayName).join(', ')
+          : 'VCに参加していません';
+        
+        const activeStreams = guildData?.userStreams 
+          ? [...guildData.userStreams.entries()].map(([id, data]) => {
+              const member = interaction.guild.members.cache.get(id);
+              const name = member?.displayName || id;
+              const age = Math.round((Date.now() - (data.startTime || 0)) / 1000);
+              return `${name} (${age}秒)`;
+            }).join(', ') || 'なし'
+          : 'なし';
+        
+        const embed = {
+          title: '🔧 デバッグ情報',
+          fields: [
+            {
+              name: '🔌 接続状態',
+              value: guildData?.connection ? '✅ 接続中' : '❌ 未接続',
+              inline: true
+            },
+            {
+              name: '👂 リスニング',
+              value: guildData?.isListening ? '✅ 有効' : '❌ 無効',
+              inline: true
+            },
+            {
+              name: '🎤 音声認識エンジン',
+              value: STT_ENGINE.toUpperCase(),
+              inline: true
+            },
+            {
+              name: '👥 VCメンバー',
+              value: vcMembers || 'なし'
+            },
+            {
+              name: '📡 アクティブストリーム',
+              value: activeStreams
+            },
+            {
+              name: '🔊 登録サウンド数',
+              value: `${Object.keys(customSounds).length}件`,
+              inline: true
+            }
+          ],
+          color: 0x5865F2,
+          footer: { text: '音声が認識されない場合は、マイクの入力レベルを確認してください' }
+        };
+        await interaction.reply({ embeds: [embed] });
+        break;
+      }
+
+      case 'test': {
+        const voiceChannel = interaction.member?.voice?.channel;
+        if (!voiceChannel) {
+          await interaction.reply({ content: '❌ 先にボイスチャンネルに参加してください', ephemeral: true });
+          return;
+        }
+        
+        const guildData = guildConnections.get(interaction.guild.id);
+        if (!guildData?.connection) {
+          await interaction.reply({ content: '❌ Botがボイスチャンネルに参加していません。先に `/join` を実行してください', ephemeral: true });
+          return;
+        }
+        
+        await interaction.reply('🎤 **マイクテスト開始！**\n5秒間、何か話してみてください...\nコンソールにログが表示されます。');
+        
+        // 5秒後に結果を報告
+        setTimeout(async () => {
+          const streams = guildData.userStreams;
+          const activeUsers = [...streams.entries()].map(([id, data]) => {
+            const member = interaction.guild.members.cache.get(id);
+            return member?.displayName || id;
+          });
+          
+          if (activeUsers.length > 0) {
+            await interaction.followUp(`✅ 音声を検出しました: ${activeUsers.join(', ')}`);
+          } else {
+            await interaction.followUp('⚠️ 音声が検出されませんでした。\n\n**確認事項:**\n• マイクがミュートになっていないか\n• 入力デバイスが正しく選択されているか\n• Discordの音声設定で「入力感度」が適切か');
+          }
+        }, 5000);
         break;
       }
     }
