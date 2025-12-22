@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events, GuildMember } from 'discord.js';
+import { Client, GatewayIntentBits, Events, GuildMember, REST, Routes, SlashCommandBuilder } from 'discord.js';
 import { 
   joinVoiceChannel, 
   createAudioPlayer, 
@@ -174,6 +174,82 @@ const client = new Client({
     GatewayIntentBits.MessageContent
   ]
 });
+
+// ===========================================
+// スラッシュコマンド定義
+// ===========================================
+const commands = [
+  new SlashCommandBuilder()
+    .setName('join')
+    .setDescription('ボイスチャンネルに参加して音声認識を開始します'),
+  new SlashCommandBuilder()
+    .setName('leave')
+    .setDescription('ボイスチャンネルから退出します'),
+  new SlashCommandBuilder()
+    .setName('sounds')
+    .setDescription('登録されているサウンド一覧を表示します'),
+  new SlashCommandBuilder()
+    .setName('add')
+    .setDescription('新しいサウンドを登録します')
+    .addStringOption(option =>
+      option.setName('keyword')
+        .setDescription('トリガーとなるキーワード')
+        .setRequired(true))
+    .addAttachmentOption(option =>
+      option.setName('file')
+        .setDescription('音声ファイル (MP3, WAV, OGG, M4A)')
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('delete')
+    .setDescription('登録したサウンドを削除します')
+    .addStringOption(option =>
+      option.setName('keyword')
+        .setDescription('削除するキーワード')
+        .setRequired(true)
+        .setAutocomplete(true)),
+  new SlashCommandBuilder()
+    .setName('edit')
+    .setDescription('登録したサウンドのキーワードを変更します')
+    .addStringOption(option =>
+      option.setName('old_keyword')
+        .setDescription('現在のキーワード')
+        .setRequired(true)
+        .setAutocomplete(true))
+    .addStringOption(option =>
+      option.setName('new_keyword')
+        .setDescription('新しいキーワード')
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('play')
+    .setDescription('サウンドを手動で再生します')
+    .addStringOption(option =>
+      option.setName('keyword')
+        .setDescription('再生するサウンドのキーワード')
+        .setRequired(true)
+        .setAutocomplete(true)),
+  new SlashCommandBuilder()
+    .setName('help')
+    .setDescription('使い方を表示します'),
+].map(command => command.toJSON());
+
+// スラッシュコマンドを登録する関数
+async function registerSlashCommands() {
+  const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+  
+  try {
+    console.log('🔄 スラッシュコマンドを登録中...');
+    
+    // グローバルコマンドとして登録
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: commands }
+    );
+    
+    console.log('✅ スラッシュコマンドを登録しました');
+  } catch (error) {
+    console.error('❌ スラッシュコマンドの登録に失敗:', error);
+  }
+}
 
 // サーバーごとの接続管理 (guildId -> { connection, player, isListening, userStreams })
 const guildConnections = new Map();
@@ -1020,8 +1096,12 @@ app.listen(HTTP_PORT, () => {
 });
 
 // Discord Bot Events
-client.once(Events.ClientReady, () => {
+client.once(Events.ClientReady, async () => {
   console.log(`✅ Discord Bot logged in as ${client.user.tag}`);
+  
+  // スラッシュコマンドを登録
+  await registerSlashCommands();
+  
   console.log('');
   console.log('🔧 現在の設定:');
   console.log(`   音声認識エンジン: ${STT_ENGINE}`);
@@ -1031,16 +1111,233 @@ client.once(Events.ClientReady, () => {
   }
   console.log('');
   console.log('📝 使い方:');
-  console.log('  サウンド登録: "トリガ:キーワード" + 音声ファイル添付');
-  console.log('  サウンド一覧: !sounds');
-  console.log('  サウンド削除: !delete キーワード');
-  console.log('  VC参加: !join');
-  console.log('  VC退出: !leave');
+  console.log('  【スラッシュコマンド】');
+  console.log('  /join - ボイスチャンネルに参加');
+  console.log('  /leave - ボイスチャンネルから退出');
+  console.log('  /sounds - サウンド一覧');
+  console.log('  /add - サウンド追加');
+  console.log('  /edit - キーワード編集');
+  console.log('  /delete - サウンド削除');
+  console.log('  /play - サウンド再生');
+  console.log('');
+  console.log('  【テキストコマンド（従来互換）】');
+  console.log('  トリガ:キーワード + 音声ファイル添付');
+  console.log('  !sounds, !delete, !join, !leave');
   console.log('');
   broadcastStatus();
 });
 
-// メッセージでサウンド登録
+// ===========================================
+// スラッシュコマンド処理
+// ===========================================
+client.on(Events.InteractionCreate, async (interaction) => {
+  // オートコンプリート処理
+  if (interaction.isAutocomplete()) {
+    const focusedOption = interaction.options.getFocused(true);
+    const keywords = Object.keys(customSounds);
+    
+    const filtered = keywords
+      .filter(keyword => keyword.toLowerCase().includes(focusedOption.value.toLowerCase()))
+      .slice(0, 25);
+    
+    await interaction.respond(
+      filtered.map(keyword => ({ name: keyword, value: keyword }))
+    );
+    return;
+  }
+
+  if (!interaction.isChatInputCommand()) return;
+
+  const { commandName } = interaction;
+
+  try {
+    switch (commandName) {
+      case 'join': {
+        const voiceChannel = interaction.member?.voice?.channel;
+        if (!voiceChannel) {
+          await interaction.reply({ content: '❌ 先にボイスチャンネルに参加してください', ephemeral: true });
+          return;
+        }
+        await interaction.deferReply();
+        try {
+          await joinVC(interaction.guild, voiceChannel);
+          await interaction.editReply(`✅ ${voiceChannel.name} に参加しました！音声認識を開始します🎤`);
+        } catch (error) {
+          await interaction.editReply('❌ 参加に失敗しました: ' + error.message);
+        }
+        break;
+      }
+
+      case 'leave': {
+        handleLeaveChannel(null, interaction.guild.id);
+        await interaction.reply('👋 ボイスチャンネルから退出しました');
+        break;
+      }
+
+      case 'sounds': {
+        const customList = Object.entries(customSounds)
+          .map(([keyword, data]) => `• **${keyword}** (by ${data.addedBy})`)
+          .join('\n') || 'カスタムサウンドはまだ登録されていません';
+        
+        const embed = {
+          title: '🎵 登録済みサウンド',
+          fields: [
+            {
+              name: `カスタムサウンド (${Object.keys(customSounds).length}件)`,
+              value: customList.slice(0, 1024)
+            }
+          ],
+          color: 0x5865F2
+        };
+        await interaction.reply({ embeds: [embed] });
+        break;
+      }
+
+      case 'add': {
+        const keyword = interaction.options.getString('keyword');
+        const attachment = interaction.options.getAttachment('file');
+        
+        const validExtensions = ['.mp3', '.wav', '.ogg', '.m4a'];
+        const ext = attachment.name.toLowerCase().slice(attachment.name.lastIndexOf('.'));
+        
+        if (!validExtensions.includes(ext)) {
+          await interaction.reply({ content: '❌ 対応していないファイル形式です（MP3, WAV, OGG, M4A のみ）', ephemeral: true });
+          return;
+        }
+
+        await interaction.deferReply();
+        
+        try {
+          const response = await fetch(attachment.url);
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const filename = `custom_${Date.now()}${ext}`;
+          const filepath = join(SOUNDS_DIR, filename);
+          
+          writeFileSync(filepath, buffer);
+
+          customSounds[keyword] = {
+            file: filename,
+            addedBy: interaction.user.tag,
+            addedAt: new Date().toISOString()
+          };
+          saveCustomSounds(customSounds);
+
+          console.log(`✅ New sound registered: "${keyword}" -> ${filename}`);
+          await interaction.editReply(`✅ サウンドを登録しました！\nキーワード: **${keyword}**\nボイスチャンネルで「${keyword}」と言うと再生されます🔊`);
+        } catch (error) {
+          console.error('Failed to save sound:', error);
+          await interaction.editReply('❌ サウンドの保存に失敗しました');
+        }
+        break;
+      }
+
+      case 'delete': {
+        const keyword = interaction.options.getString('keyword');
+        
+        if (customSounds[keyword]) {
+          const file = customSounds[keyword].file;
+          delete customSounds[keyword];
+          saveCustomSounds(customSounds);
+          try { unlinkSync(join(SOUNDS_DIR, file)); } catch (e) {}
+          await interaction.reply(`✅ サウンド「${keyword}」を削除しました`);
+        } else {
+          await interaction.reply({ content: `❌ サウンド「${keyword}」は見つかりませんでした`, ephemeral: true });
+        }
+        break;
+      }
+
+      case 'edit': {
+        const oldKeyword = interaction.options.getString('old_keyword');
+        const newKeyword = interaction.options.getString('new_keyword');
+        
+        if (!customSounds[oldKeyword]) {
+          await interaction.reply({ content: `❌ サウンド「${oldKeyword}」は見つかりませんでした`, ephemeral: true });
+          return;
+        }
+        
+        if (customSounds[newKeyword]) {
+          await interaction.reply({ content: `❌ キーワード「${newKeyword}」は既に使用されています`, ephemeral: true });
+          return;
+        }
+        
+        // キーワードを変更（ファイルはそのまま）
+        customSounds[newKeyword] = {
+          ...customSounds[oldKeyword],
+          editedBy: interaction.user.tag,
+          editedAt: new Date().toISOString()
+        };
+        delete customSounds[oldKeyword];
+        saveCustomSounds(customSounds);
+        
+        console.log(`✏️ Sound keyword edited: "${oldKeyword}" -> "${newKeyword}"`);
+        await interaction.reply(`✅ キーワードを変更しました！\n「${oldKeyword}」→「${newKeyword}」`);
+        break;
+      }
+
+      case 'play': {
+        const keyword = interaction.options.getString('keyword');
+        const guildData = guildConnections.get(interaction.guild.id);
+        
+        if (!guildData || !guildData.connection) {
+          await interaction.reply({ content: '❌ ボイスチャンネルに接続していません。先に `/join` を実行してください', ephemeral: true });
+          return;
+        }
+        
+        const soundFile = customSounds[keyword]?.file;
+        if (!soundFile) {
+          await interaction.reply({ content: `❌ サウンド「${keyword}」は見つかりませんでした`, ephemeral: true });
+          return;
+        }
+        
+        const played = await playSound(soundFile, 'slash_command', interaction.guild.id);
+        if (played) {
+          await interaction.reply(`🔊 「${keyword}」を再生しました！`);
+        } else {
+          await interaction.reply({ content: '❌ 再生に失敗しました', ephemeral: true });
+        }
+        break;
+      }
+
+      case 'help': {
+        const embed = {
+          title: '🎵 Super Soundboard Bot',
+          description: 'ボイスチャンネルでキーワードを話すと自動でサウンドが再生されるBotです',
+          fields: [
+            {
+              name: '🔊 基本的な使い方',
+              value: '1. `/join` でBotをVCに呼ぶ\n2. VCでキーワードを言う\n3. 自動でサウンドが再生される！'
+            },
+            {
+              name: '📝 サウンド管理',
+              value: '`/add` - 新しいサウンドを追加\n`/edit` - キーワードを変更\n`/delete` - サウンドを削除\n`/sounds` - 一覧を表示'
+            },
+            {
+              name: '🎮 その他',
+              value: '`/play` - サウンドを手動再生\n`/join` - VCに参加\n`/leave` - VCから退出'
+            },
+            {
+              name: '💡 テキストコマンド（従来互換）',
+              value: '`トリガ:キーワード` + ファイル添付\n`!sounds`, `!delete`, `!join`, `!leave`'
+            }
+          ],
+          color: 0x5865F2
+        };
+        await interaction.reply({ embeds: [embed] });
+        break;
+      }
+    }
+  } catch (error) {
+    console.error('Slash command error:', error);
+    const reply = { content: '❌ コマンドの実行中にエラーが発生しました', ephemeral: true };
+    if (interaction.deferred) {
+      await interaction.editReply(reply.content);
+    } else if (!interaction.replied) {
+      await interaction.reply(reply);
+    }
+  }
+});
+
+// メッセージでサウンド登録（従来互換）
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
 
@@ -1115,6 +1412,39 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
 
+  // トリガ編集: !edit 旧キーワード 新キーワード
+  if (content.startsWith('!edit ') || content.startsWith('!編集 ')) {
+    const args = content.replace(/^!(edit|編集)\s+/, '').trim().split(/\s+/);
+    if (args.length < 2) {
+      message.reply('❌ 使用方法: `!edit 旧キーワード 新キーワード`');
+      return;
+    }
+    const oldKeyword = args[0];
+    const newKeyword = args[1];
+    
+    if (!customSounds[oldKeyword]) {
+      message.reply(`❌ サウンド「${oldKeyword}」は見つかりませんでした`);
+      return;
+    }
+    
+    if (customSounds[newKeyword]) {
+      message.reply(`❌ キーワード「${newKeyword}」は既に使用されています`);
+      return;
+    }
+    
+    customSounds[newKeyword] = {
+      ...customSounds[oldKeyword],
+      editedBy: message.author.tag,
+      editedAt: new Date().toISOString()
+    };
+    delete customSounds[oldKeyword];
+    saveCustomSounds(customSounds);
+    
+    console.log(`✏️ Sound keyword edited: "${oldKeyword}" -> "${newKeyword}"`);
+    message.reply(`✅ キーワードを変更しました！\n「${oldKeyword}」→「${newKeyword}」`);
+    return;
+  }
+
   if (content === '!join' || content === '!参加') {
     const voiceChannel = message.member?.voice?.channel;
     if (!voiceChannel) {
@@ -1138,19 +1468,24 @@ client.on(Events.MessageCreate, async (message) => {
   if (content === '!help' || content === '!ヘルプ') {
     message.reply(`🎵 **Super Soundboard Bot**
 
-**サウンド登録:**
-\`トリガ:キーワード\` + 音声ファイル添付
+**スラッシュコマンド（推奨）:**
+• \`/join\` - ボイスチャンネルに参加
+• \`/leave\` - ボイスチャンネルから退出
+• \`/sounds\` - 登録済みサウンド一覧
+• \`/add\` - サウンドを追加
+• \`/edit\` - キーワードを編集
+• \`/delete\` - サウンドを削除
+• \`/play\` - サウンドを手動再生
 
-**コマンド:**
-• \`!join\` - ボイスチャンネルに参加
-• \`!leave\` - ボイスチャンネルから退出  
-• \`!sounds\` - 登録済みサウンド一覧
-• \`!delete キーワード\` - サウンドを削除
-• \`!help\` - このヘルプを表示
+**テキストコマンド（従来互換）:**
+• \`トリガ:キーワード\` + 音声ファイル添付
+• \`!edit 旧キーワード 新キーワード\` - キーワード編集
+• \`!delete キーワード\` - サウンド削除
+• \`!sounds\`, \`!join\`, \`!leave\`
 
 **使い方:**
-1. \`!join\` でBotをVCに呼ぶ
-2. VCで「やばい」「すごい」などのキーワードを言う
+1. \`/join\` でBotをVCに呼ぶ
+2. VCでキーワードを言う
 3. 自動でサウンドが再生される！`);
     return;
   }
