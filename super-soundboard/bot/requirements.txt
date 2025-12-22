@@ -1,0 +1,10 @@
+# Super Soundboard Bot - Python依存関係
+# 仮想環境で pip install -r requirements.txt
+
+# 音声認識（どちらか選択）
+faster-whisper>=1.0.0    # 高速版（推奨）
+# openai-whisper          # 通常版（遅い）
+
+# GPU使用時（CUDA 12.x用）
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0

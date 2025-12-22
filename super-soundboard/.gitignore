@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+bot/node_modules/
+electron-app/node_modules/
+
+# Python
+bot/venv/
+__pycache__/
+*.pyc
+
+# Build
+dist/
+
+# Temp files
+bot/sounds/temp_*
+*.log
+
+# Models (large files)
+bot/models/
+
+# Environment
+.env
+.dev.vars
+
+# OS
+.DS_Store
+Thumbs.db
+bot/google-credentials.json

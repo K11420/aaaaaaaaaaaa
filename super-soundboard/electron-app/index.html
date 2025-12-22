@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Super Soundboard - Speech Recognition</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      padding: 20px;
+      margin: 0;
+    }
+    .status {
+      padding: 10px;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    .connected { background: #2d5a27; }
+    .disconnected { background: #5a2727; }
+    .listening { background: #27415a; }
+    #transcript {
+      background: #2a2a4a;
+      padding: 15px;
+      border-radius: 8px;
+      min-height: 60px;
+      margin-top: 10px;
+    }
+    .log {
+      font-size: 12px;
+      color: #888;
+      margin-top: 10px;
+      max-height: 100px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <h3>🎤 Super Soundboard</h3>
+  
+  <div id="bot-status" class="status disconnected">
+    Bot: 未接続
+  </div>
+  
+  <div id="speech-status" class="status listening">
+    音声認識: 待機中
+  </div>
+  
+  <div id="transcript">
+    <span style="color: #666;">認識結果がここに表示されます...</span>
+  </div>
+  
+  <div id="log" class="log"></div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    let recognition = null;
+    let isListening = false;
+    
+    // Web Speech API セットアップ
+    function setupSpeechRecognition() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      
+      if (!SpeechRecognition) {
+        log('❌ Web Speech API not supported');
+        return;
+      }
+      
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'ja-JP';
+      
+      recognition.onstart = () => {
+        isListening = true;
+        updateSpeechStatus('🎧 聴いています...');
+        log('Speech recognition started');
+      };
+      
+      recognition.onresult = (event) => {
+        let finalTranscript = '';
+        let interimTranscript = '';
+        
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+        
+        // 表示更新
+        document.getElementById('transcript').innerHTML = 
+          `<span style="color:#fff">${finalTranscript}</span>` +
+          `<span style="color:#888">${interimTranscript}</span>`;
+        
+        // 確定したテキストをBotに送信
+        if (finalTranscript) {
+          log(`📝 送信: "${finalTranscript}"`);
+          ipcRenderer.send('speech-result', finalTranscript);
+        }
+      };
+      
+      recognition.onerror = (event) => {
+        log(`⚠️ Error: ${event.error}`);
+        if (event.error === 'no-speech') {
+          // 無音エラーは無視して継続
+        }
+      };
+      
+      recognition.onend = () => {
+        isListening = false;
+        // 自動再開
+        if (recognition) {
+          setTimeout(() => {
+            try {
+              recognition.start();
+            } catch (e) {}
+          }, 100);
+        }
+      };
+      
+      // 開始
+      try {
+        recognition.start();
+        log('✅ Speech recognition initialized');
+      } catch (e) {
+        log(`❌ Failed to start: ${e.message}`);
+      }
+    }
+    
+    function updateSpeechStatus(text) {
+      const el = document.getElementById('speech-status');
+      el.textContent = `音声認識: ${text}`;
+      el.className = 'status listening';
+    }
+    
+    function log(msg) {
+      const el = document.getElementById('log');
+      const time = new Date().toLocaleTimeString();
+      el.innerHTML = `[${time}] ${msg}<br>` + el.innerHTML;
+    }
+    
+    // Bot接続状態
+    ipcRenderer.on('bot-status', (event, data) => {
+      const el = document.getElementById('bot-status');
+      if (data.connected) {
+        el.textContent = 'Bot: ✅ 接続中';
+        el.className = 'status connected';
+      } else {
+        el.textContent = 'Bot: ❌ 未接続';
+        el.className = 'status disconnected';
+      }
+    });
+    
+    // Discord音声受信（今回は使わない - マイク入力を使用）
+    ipcRenderer.on('discord-audio', (event, data) => {
+      log(`🎵 Discord audio received (${data.userId})`);
+    });
+    
+    // 初期化
+    setupSpeechRecognition();
+  </script>
+</body>
+</html>
