@@ -28,6 +28,7 @@ try {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SOUNDS_DIR = join(__dirname, 'sounds');
 const CUSTOM_SOUNDS_FILE = join(__dirname, 'custom_sounds.json');
+const STATS_FILE = join(__dirname, 'sound_stats.json');  // 統計データ保存用
 
 // ===========================================
 // 音声認識エンジン設定
@@ -159,6 +160,148 @@ function saveCustomSounds(sounds) {
   }
 }
 
+// ===========================================
+// 統計データ管理
+// ===========================================
+// 統計データ構造:
+// {
+//   sounds: { keyword: { totalPlays: N, lastPlayed: timestamp } },
+//   users: { oderId: { totalTriggers: N, sounds: { keyword: N }, name: 'username' } },
+//   daily: { 'YYYY-MM-DD': { plays: N, triggers: { keyword: N } } }
+// }
+
+function loadStats() {
+  try {
+    if (existsSync(STATS_FILE)) {
+      return JSON.parse(readFileSync(STATS_FILE, 'utf-8'));
+    }
+  } catch (e) {
+    console.error('Failed to load stats:', e);
+  }
+  return { sounds: {}, users: {}, daily: {} };
+}
+
+function saveStats(stats) {
+  try {
+    writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+  } catch (e) {
+    console.error('Failed to save stats:', e);
+  }
+}
+
+let soundStats = loadStats();
+
+// 統計を記録する関数
+function recordSoundPlay(keyword, userId, userName) {
+  const now = Date.now();
+  const today = new Date().toISOString().split('T')[0];  // YYYY-MM-DD
+  
+  // サウンド統計
+  if (!soundStats.sounds[keyword]) {
+    soundStats.sounds[keyword] = { totalPlays: 0, lastPlayed: null };
+  }
+  soundStats.sounds[keyword].totalPlays++;
+  soundStats.sounds[keyword].lastPlayed = now;
+  
+  // ユーザー統計
+  if (userId) {
+    if (!soundStats.users[userId]) {
+      soundStats.users[userId] = { totalTriggers: 0, sounds: {}, name: userName || 'Unknown' };
+    }
+    soundStats.users[userId].totalTriggers++;
+    soundStats.users[userId].name = userName || soundStats.users[userId].name;
+    if (!soundStats.users[userId].sounds[keyword]) {
+      soundStats.users[userId].sounds[keyword] = 0;
+    }
+    soundStats.users[userId].sounds[keyword]++;
+  }
+  
+  // 日別統計
+  if (!soundStats.daily[today]) {
+    soundStats.daily[today] = { plays: 0, triggers: {} };
+  }
+  soundStats.daily[today].plays++;
+  if (!soundStats.daily[today].triggers[keyword]) {
+    soundStats.daily[today].triggers[keyword] = 0;
+  }
+  soundStats.daily[today].triggers[keyword]++;
+  
+  // 30日より古いデータを削除
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const cutoffDate = thirtyDaysAgo.toISOString().split('T')[0];
+  for (const date of Object.keys(soundStats.daily)) {
+    if (date < cutoffDate) {
+      delete soundStats.daily[date];
+    }
+  }
+  
+  // 保存（デバウンス：1秒後）
+  if (recordSoundPlay.saveTimeout) {
+    clearTimeout(recordSoundPlay.saveTimeout);
+  }
+  recordSoundPlay.saveTimeout = setTimeout(() => saveStats(soundStats), 1000);
+}
+
+// ランキングを取得
+function getSoundRanking(limit = 10) {
+  const sorted = Object.entries(soundStats.sounds)
+    .sort((a, b) => b[1].totalPlays - a[1].totalPlays)
+    .slice(0, limit);
+  return sorted.map(([keyword, data], index) => ({
+    rank: index + 1,
+    keyword,
+    plays: data.totalPlays,
+    lastPlayed: data.lastPlayed
+  }));
+}
+
+// ユーザーランキングを取得
+function getUserRanking(limit = 10) {
+  const sorted = Object.entries(soundStats.users)
+    .sort((a, b) => b[1].totalTriggers - a[1].totalTriggers)
+    .slice(0, limit);
+  return sorted.map(([userId, data], index) => ({
+    rank: index + 1,
+    userId,
+    name: data.name,
+    triggers: data.totalTriggers,
+    topSound: Object.entries(data.sounds).sort((a, b) => b[1] - a[1])[0]
+  }));
+}
+
+// 特定ユーザーの統計を取得
+function getUserStats(userId) {
+  const userData = soundStats.users[userId];
+  if (!userData) return null;
+  
+  const topSounds = Object.entries(userData.sounds)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  
+  return {
+    name: userData.name,
+    totalTriggers: userData.totalTriggers,
+    topSounds: topSounds.map(([keyword, count]) => ({ keyword, count }))
+  };
+}
+
+// 今日の統計を取得
+function getTodayStats() {
+  const today = new Date().toISOString().split('T')[0];
+  const data = soundStats.daily[today] || { plays: 0, triggers: {} };
+  
+  const topSounds = Object.entries(data.triggers)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  
+  return {
+    date: today,
+    totalPlays: data.plays,
+    topSounds: topSounds.map(([keyword, count]) => ({ keyword, count }))
+  };
+}
+
 // カスタムサウンド { keyword: { file: 'filename.mp3', addedBy: 'user' } }
 let customSounds = loadCustomSounds();
 
@@ -252,6 +395,35 @@ const commands = [
   new SlashCommandBuilder()
     .setName('test')
     .setDescription('音声認識をテストします（5秒間マイクを監視）'),
+  // 統計コマンド
+  new SlashCommandBuilder()
+    .setName('ranking')
+    .setDescription('サウンド再生ランキングを表示します')
+    .addIntegerOption(option =>
+      option.setName('limit')
+        .setDescription('表示件数（デフォルト: 10）')
+        .setRequired(false)
+        .setMinValue(1)
+        .setMaxValue(25)),
+  new SlashCommandBuilder()
+    .setName('userstats')
+    .setDescription('ユーザーの統計情報を表示します')
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('確認するユーザー（省略で自分）')
+        .setRequired(false)),
+  new SlashCommandBuilder()
+    .setName('userranking')
+    .setDescription('ユーザー発言ランキングを表示します')
+    .addIntegerOption(option =>
+      option.setName('limit')
+        .setDescription('表示件数（デフォルト: 10）')
+        .setRequired(false)
+        .setMinValue(1)
+        .setMaxValue(25)),
+  new SlashCommandBuilder()
+    .setName('todaystats')
+    .setDescription('今日のサウンド再生統計を表示します'),
 ].map(command => command.toJSON());
 
 // スラッシュコマンドを登録する関数
@@ -903,7 +1075,7 @@ function startVoskRecognition(userId, audioStream, userStreams, guildId, userNam
         const result = JSON.parse(line);
         if (result.type === 'final' && result.text) {
           console.log(`\n📝 [${userName}] 認識結果: "${result.text}"`);
-          handleRecognitionResult(result.text, guildId);
+          handleRecognitionResult(result.text, guildId, userId, userName);
           lastPartial = '';
           triggeredKeywords.clear();
         } else if (result.type === 'partial' && result.text) {
@@ -916,6 +1088,11 @@ function startVoskRecognition(userId, audioStream, userStreams, guildId, userNam
             const soundFile = getSoundFile(result.text);
             if (soundFile && !triggeredKeywords.has(soundFile)) {
               console.log(`\n⚡ [${userName}] 即時トリガー: "${result.text}" -> ${soundFile}`);
+              // 即時トリガーでも統計記録
+              const keyword = findMatchingKeyword(result.text);
+              if (keyword) {
+                recordSoundPlay(keyword, userId, userName);
+              }
               playSound(soundFile, 'discord_voice_instant', guildId);
               triggeredKeywords.add(soundFile);
             }
@@ -1180,20 +1357,30 @@ async function transcribeWithWhisper(wavPath, guildId) {
 }
 
 // 認識結果の処理（共通）- 特定サーバーで再生
-function handleRecognitionResult(transcript, guildId = null) {
-  console.log(`📝 Recognized: "${transcript}"${guildId ? ` [Server:${guildId}]` : ''}`);
+function handleRecognitionResult(transcript, guildId = null, userId = null, userName = null) {
+  console.log(`📝 Recognized: "${transcript}"${guildId ? ` [Server:${guildId}]` : ''}${userName ? ` by ${userName}` : ''}`);
   
   const soundFile = getSoundFile(transcript);
   if (soundFile) {
+    // キーワードを特定（完全一致を探す）
+    const keyword = findMatchingKeyword(transcript);
+    
     console.log(`🔊 Playing: ${soundFile}${guildId ? ` [Server:${guildId}]` : ''}`);
     playSound(soundFile, 'discord_voice', guildId);
     
+    // 統計を記録
+    if (keyword) {
+      recordSoundPlay(keyword, userId, userName);
+    }
+    
     const notification = JSON.stringify({
       type: 'sound_played',
-      keyword: transcript,
+      keyword: keyword || transcript,
       soundFile: soundFile,
       source: 'discord_voice',
-      guildId: guildId
+      guildId: guildId,
+      userId: userId,
+      userName: userName
     });
     connectedClients.forEach(client => {
       if (client.readyState === 1) {
@@ -1201,6 +1388,27 @@ function handleRecognitionResult(transcript, guildId = null) {
       }
     });
   }
+}
+
+// マッチしたキーワードを見つける
+function findMatchingKeyword(transcript) {
+  const lowerTranscript = transcript.toLowerCase();
+  
+  // カスタムサウンドから検索
+  for (const keyword of Object.keys(customSounds)) {
+    if (lowerTranscript.includes(keyword.toLowerCase())) {
+      return keyword;
+    }
+  }
+  
+  // プリセットサウンドから検索
+  for (const keyword of Object.keys(presetSounds)) {
+    if (lowerTranscript.includes(keyword.toLowerCase())) {
+      return keyword;
+    }
+  }
+  
+  return null;
 }
 
 // WAVバッファを作成
@@ -1644,6 +1852,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
               value: '`/play` - サウンドを手動再生\n`/join` - VCに参加\n`/leave` - VCから退出'
             },
             {
+              name: '📊 統計',
+              value: '`/ranking` - サウンド再生ランキング\n`/userranking` - ユーザー発言ランキング\n`/userstats` - 個人の統計\n`/todaystats` - 今日の統計'
+            },
+            {
               name: '🔧 デバッグ',
               value: '`/debug` - 音声認識の状態を確認\n`/test` - マイクテスト'
             },
@@ -1743,6 +1955,136 @@ client.on(Events.InteractionCreate, async (interaction) => {
             await interaction.followUp('⚠️ 音声が検出されませんでした。\n\n**確認事項:**\n• マイクがミュートになっていないか\n• 入力デバイスが正しく選択されているか\n• Discordの音声設定で「入力感度」が適切か');
           }
         }, 5000);
+        break;
+      }
+
+      // ========== 統計コマンド ==========
+      
+      case 'ranking': {
+        const limit = interaction.options.getInteger('limit') || 10;
+        const ranking = getSoundRanking(limit);
+        
+        if (ranking.length === 0) {
+          await interaction.reply({ content: '📊 まだ再生データがありません', ephemeral: true });
+          return;
+        }
+        
+        const medals = ['🥇', '🥈', '🥉'];
+        const lines = ranking.map((item, i) => {
+          const medal = medals[i] || `**${item.rank}.**`;
+          const lastPlayed = item.lastPlayed 
+            ? `(最終: ${new Date(item.lastPlayed).toLocaleDateString('ja-JP')})`
+            : '';
+          return `${medal} **${item.keyword}** - ${item.plays}回 ${lastPlayed}`;
+        });
+        
+        const totalPlays = Object.values(soundStats.sounds).reduce((sum, s) => sum + s.totalPlays, 0);
+        
+        const embed = {
+          title: '🏆 サウンド再生ランキング',
+          description: lines.join('\n'),
+          footer: { text: `総再生回数: ${totalPlays}回 | 登録サウンド: ${Object.keys(customSounds).length}件` },
+          color: 0xFFD700,
+          timestamp: new Date().toISOString()
+        };
+        
+        await interaction.reply({ embeds: [embed] });
+        break;
+      }
+
+      case 'userranking': {
+        const limit = interaction.options.getInteger('limit') || 10;
+        const ranking = getUserRanking(limit);
+        
+        if (ranking.length === 0) {
+          await interaction.reply({ content: '📊 まだユーザーデータがありません', ephemeral: true });
+          return;
+        }
+        
+        const medals = ['🥇', '🥈', '🥉'];
+        const lines = ranking.map((item, i) => {
+          const medal = medals[i] || `**${item.rank}.**`;
+          const topSound = item.topSound ? `(お気に入り: ${item.topSound[0]})` : '';
+          return `${medal} **${item.name}** - ${item.triggers}回 ${topSound}`;
+        });
+        
+        const embed = {
+          title: '👑 ユーザー発言ランキング',
+          description: lines.join('\n'),
+          footer: { text: 'サウンドをトリガーした回数でランキング' },
+          color: 0x9B59B6,
+          timestamp: new Date().toISOString()
+        };
+        
+        await interaction.reply({ embeds: [embed] });
+        break;
+      }
+
+      case 'userstats': {
+        const targetUser = interaction.options.getUser('user') || interaction.user;
+        const stats = getUserStats(targetUser.id);
+        
+        if (!stats) {
+          const message = targetUser.id === interaction.user.id 
+            ? '📊 あなたの統計データはまだありません。ボイスチャンネルでキーワードを発言してみてください！'
+            : `📊 ${targetUser.displayName} の統計データはまだありません`;
+          await interaction.reply({ content: message, ephemeral: true });
+          return;
+        }
+        
+        const topSoundsText = stats.topSounds.length > 0
+          ? stats.topSounds.map((s, i) => `${i + 1}. **${s.keyword}** (${s.count}回)`).join('\n')
+          : 'なし';
+        
+        const embed = {
+          title: `📊 ${stats.name} の統計`,
+          fields: [
+            {
+              name: '🎯 総トリガー回数',
+              value: `**${stats.totalTriggers}回**`,
+              inline: true
+            },
+            {
+              name: '🏆 よく使うサウンド TOP5',
+              value: topSoundsText,
+              inline: false
+            }
+          ],
+          color: 0x3498DB,
+          thumbnail: { url: targetUser.displayAvatarURL() },
+          timestamp: new Date().toISOString()
+        };
+        
+        await interaction.reply({ embeds: [embed] });
+        break;
+      }
+
+      case 'todaystats': {
+        const stats = getTodayStats();
+        
+        const topSoundsText = stats.topSounds.length > 0
+          ? stats.topSounds.map((s, i) => `${i + 1}. **${s.keyword}** (${s.count}回)`).join('\n')
+          : 'まだ再生されていません';
+        
+        const embed = {
+          title: `📅 今日の統計 (${stats.date})`,
+          fields: [
+            {
+              name: '🔊 本日の再生回数',
+              value: `**${stats.totalPlays}回**`,
+              inline: true
+            },
+            {
+              name: '🔥 人気サウンド TOP5',
+              value: topSoundsText,
+              inline: false
+            }
+          ],
+          color: 0x2ECC71,
+          timestamp: new Date().toISOString()
+        };
+        
+        await interaction.reply({ embeds: [embed] });
         break;
       }
     }
