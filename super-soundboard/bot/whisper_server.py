@@ -17,8 +17,9 @@ import time
 import socket
 import threading
 import tempfile
+import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import cgi
+import re
 
 # 設定
 MODEL_SIZE = os.environ.get('WHISPER_MODEL', 'tiny')
@@ -114,6 +115,29 @@ def socket_server():
             client.close()
 
 # === HTTP Server ===
+def parse_multipart(content_type, body):
+    """シンプルなマルチパート解析"""
+    # boundary を取得
+    match = re.search(r'boundary=(.+)', content_type)
+    if not match:
+        return None
+    boundary = match.group(1).encode()
+    
+    # パーツを分割
+    parts = body.split(b'--' + boundary)
+    for part in parts:
+        if b'name="audio"' in part or b'name=audio' in part:
+            # ヘッダーとデータを分離
+            if b'\r\n\r\n' in part:
+                _, data = part.split(b'\r\n\r\n', 1)
+                # 末尾の改行を削除
+                if data.endswith(b'\r\n'):
+                    data = data[:-2]
+                if data.endswith(b'--'):
+                    data = data[:-2]
+                return data
+    return None
+
 class TranscribeHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # ログ抑制
@@ -121,18 +145,14 @@ class TranscribeHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == '/transcribe':
             content_type = self.headers.get('Content-Type', '')
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
             
             if 'multipart/form-data' in content_type:
                 # ファイルアップロード
-                form = cgi.FieldStorage(
-                    fp=self.rfile,
-                    headers=self.headers,
-                    environ={'REQUEST_METHOD': 'POST'}
-                )
+                audio_data = parse_multipart(content_type, body)
                 
-                if 'audio' in form:
-                    audio_data = form['audio'].file.read()
-                    
+                if audio_data:
                     # 一時ファイルに保存
                     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
                         f.write(audio_data)
@@ -144,7 +164,6 @@ class TranscribeHandler(BaseHTTPRequestHandler):
                             self.send_response(200)
                             self.send_header('Content-Type', 'application/json')
                             self.end_headers()
-                            import json
                             self.wfile.write(json.dumps({
                                 'text': text,
                                 'time': timing
@@ -154,14 +173,15 @@ class TranscribeHandler(BaseHTTPRequestHandler):
                             self.send_error(500, timing)
                     finally:
                         os.unlink(temp_path)
-                    return
+                else:
+                    self.send_error(400, "No audio file found")
+                return
             
             # パスで指定
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length).decode().strip()
+            path = body.decode().strip()
             
-            if body:
-                text, timing = transcribe(body)
+            if path:
+                text, timing = transcribe(path)
                 if text is not None:
                     self.send_response(200)
                     self.send_header('Content-Type', 'text/plain')
