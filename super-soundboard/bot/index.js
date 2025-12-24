@@ -970,7 +970,23 @@ function startVoskRecognition(userId, audioStream, userStreams, guildId, userNam
 }
 
 // ローカル Whisper 認識
-function startWhisperRecognition(userId, audioStream, decoder, userStreams, guildId) {
+function startWhisperRecognition(userId, audioStream, userStreams, guildId, userName) {
+  // 新しいOpusデコーダーを作成
+  let decoder;
+  try {
+    decoder = new prism.opus.Decoder({ 
+      rate: 48000, 
+      channels: 2, 
+      frameSize: 960 
+    });
+  } catch (e) {
+    console.log(`⚠️ [${userName}] デコーダー作成失敗: ${e.message}`);
+    return;
+  }
+  
+  decoder.on('error', (err) => {
+    console.log(`⚠️ [${userName}] デコーダーエラー: ${err.message}`);
+  });
   const timestamp = Date.now();
   const wavPath = join(SOUNDS_DIR, `temp_speech_${timestamp}.wav`);
   
@@ -998,14 +1014,72 @@ function startWhisperRecognition(userId, audioStream, decoder, userStreams, guil
       
       // ffmpegが完了したらWhisperで認識
       streams.ffmpeg.on('close', () => {
-        transcribeWithWhisper(wavPath);
+        transcribeWithWhisper(wavPath, guildId);
       });
     }
   });
 }
 
+// Whisper Serverに接続して認識（超高速）
+const WHISPER_SERVER_PORT = parseInt(process.env.WHISPER_SERVER_PORT || '5555');
+let whisperServerAvailable = false;
+
+async function checkWhisperServer() {
+  return new Promise((resolve) => {
+    const net = require('net');
+    const client = new net.Socket();
+    client.setTimeout(500);
+    client.on('connect', () => {
+      client.destroy();
+      resolve(true);
+    });
+    client.on('error', () => resolve(false));
+    client.on('timeout', () => {
+      client.destroy();
+      resolve(false);
+    });
+    client.connect(WHISPER_SERVER_PORT, 'localhost');
+  });
+}
+
+async function transcribeWithWhisperServer(wavPath, guildId) {
+  return new Promise((resolve, reject) => {
+    const net = require('net');
+    const client = new net.Socket();
+    const startTime = Date.now();
+    
+    client.setTimeout(10000);
+    
+    client.on('connect', () => {
+      client.write(wavPath + '\n');
+    });
+    
+    client.on('data', (data) => {
+      const text = data.toString().trim();
+      const elapsed = Date.now() - startTime;
+      client.destroy();
+      
+      if (text && !text.startsWith('ERROR')) {
+        console.log(`📝 [Server] ${elapsed}ms: "${text}"`);
+        handleRecognitionResult(text, guildId);
+        resolve(text);
+      } else {
+        reject(new Error(text));
+      }
+    });
+    
+    client.on('error', (err) => reject(err));
+    client.on('timeout', () => {
+      client.destroy();
+      reject(new Error('Timeout'));
+    });
+    
+    client.connect(WHISPER_SERVER_PORT, 'localhost');
+  });
+}
+
 // Whisperで文字起こし
-async function transcribeWithWhisper(wavPath) {
+async function transcribeWithWhisper(wavPath, guildId) {
   if (!existsSync(wavPath)) {
     console.log('⚠️ WAV file not found');
     return;
@@ -1019,6 +1093,19 @@ async function transcribeWithWhisper(wavPath) {
   }
 
   const startTime = Date.now();
+  
+  // まずWhisper Serverを試す（最速）
+  if (whisperServerAvailable || await checkWhisperServer()) {
+    whisperServerAvailable = true;
+    try {
+      await transcribeWithWhisperServer(wavPath, guildId);
+      try { unlinkSync(wavPath); } catch (e) {}
+      return;
+    } catch (e) {
+      console.log(`⚠️ Whisper Server error: ${e.message}, falling back to direct call`);
+      whisperServerAvailable = false;
+    }
+  }
   
   if (fasterWhisperAvailable) {
     // faster-whisper を使用（高速版）
@@ -1044,7 +1131,7 @@ async function transcribeWithWhisper(wavPath) {
       if (code === 0 && stdout.trim()) {
         const transcript = stdout.trim();
         console.log(`📝 faster-whisper result (${elapsed}ms): "${transcript}"`);
-        handleRecognitionResult(transcript);
+        handleRecognitionResult(transcript, guildId);
       } else if (stderr) {
         console.error(`❌ faster-whisper error:`, stderr);
       }

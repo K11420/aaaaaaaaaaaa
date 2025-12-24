@@ -156,10 +156,48 @@ Discordのテキストチャンネルで：
 
 | 方式 | 処理時間 |
 |------|----------|
+| **Whisper Server (GPU)** | **100-200ms** ⚡最速 |
 | faster-whisper (GPU) | 300-500ms |
 | Whisper (GPU) | 1-2秒 |
 | Whisper (CPU) | 10-20秒 |
 | Google Cloud Speech | リアルタイム |
+| Vosk | リアルタイム（オフライン） |
+
+## 🚀 高速モード: Whisper Server
+
+Whisper Serverを使うと、モデルをメモリに常駐させて**100-200ms**の超高速認識が可能！
+
+### サーバー起動（別ターミナル）
+```bash
+cd ~/webapp/super-soundboard/bot
+source venv/bin/activate
+
+# RTX 3050最適化（tinyモデル + int8）
+WHISPER_MODEL=tiny WHISPER_DEVICE=cuda python whisper_server.py
+```
+
+### Bot起動
+```bash
+# 別ターミナルで
+cd ~/webapp/super-soundboard/bot
+source venv/bin/activate
+DISCORD_TOKEN=xxx STT_ENGINE=whisper node index.js
+```
+
+Botは自動的にWhisper Serverを検出して使用します。
+サーバーが起動していない場合は、従来のfaster-whisper直接呼び出しにフォールバック。
+
+### RTX 3050推奨設定
+```bash
+# 最速（精度は少し落ちる）
+WHISPER_MODEL=tiny
+
+# バランス（おすすめ）
+WHISPER_MODEL=base
+
+# 高精度（少し遅い）
+WHISPER_MODEL=small
+```
 
 ## トラブルシューティング
 
