@@ -649,6 +649,11 @@ function startListening(guildId) {
 
     if (STT_ENGINE === 'google') {
       // === Google Cloud Speech-to-Text Streaming ===
+      if (!speechClient) {
+        console.log(`⚠️ [${userName}] Google Speech未設定のためスキップ`);
+        audioStream.destroy();
+        return;
+      }
       startGoogleSpeechRecognition(userId, audioStream, guildData.userStreams, guildId, userName);
     } else if (STT_ENGINE === 'whisper') {
       // === ローカル Whisper ===
@@ -669,7 +674,23 @@ function startListening(guildId) {
 }
 
 // Google Cloud Speech-to-Text ストリーミング認識
-function startGoogleSpeechRecognition(userId, audioStream, decoder, userStreams, guildId) {
+function startGoogleSpeechRecognition(userId, audioStream, userStreams, guildId, userName) {
+  // 新しいOpusデコーダーを作成
+  let decoder;
+  try {
+    decoder = new prism.opus.Decoder({ 
+      rate: 48000, 
+      channels: 2, 
+      frameSize: 960 
+    });
+  } catch (e) {
+    console.log(`⚠️ [${userName}] デコーダー作成失敗: ${e.message}`);
+    return;
+  }
+  
+  decoder.on('error', (err) => {
+    console.log(`⚠️ [${userName}] デコーダーエラー: ${err.message}`);
+  });
   const request = {
     config: {
       encoding: 'LINEAR16',
@@ -741,10 +762,29 @@ function startGoogleSpeechRecognition(userId, audioStream, decoder, userStreams,
     }
   });
 
-  userStreams.set(userId, { audioStream, decoder, ffmpeg, recognizeStream, streamEnded: false });
+  // クリーンアップ関数
+  const cleanup = () => {
+    try {
+      if (decoder && !decoder.destroyed) decoder.destroy();
+      if (ffmpeg) ffmpeg.kill('SIGTERM');
+      if (recognizeStream && !recognizeStream.destroyed) recognizeStream.end();
+      if (audioStream && !audioStream.destroyed) audioStream.destroy();
+    } catch (e) {}
+    userStreams.delete(userId);
+  };
+
+  userStreams.set(userId, { 
+    audioStream, 
+    decoder, 
+    ffmpeg, 
+    recognizeStream, 
+    streamEnded: false,
+    startTime: Date.now(),
+    cleanup
+  });
 
   audioStream.on('end', () => {
-    console.log(`\n🎤 [Server:${guildId}] User ${userId} stopped speaking`);
+    console.log(`🔇 [${userName}] 発話終了`);
     const streams = userStreams.get(userId);
     if (streams) {
       streams.streamEnded = true;
