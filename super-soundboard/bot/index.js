@@ -895,10 +895,10 @@ function startGoogleSpeechRecognition(userId, audioStream, userStreams, guildId,
           const isFinal = data.results[0].isFinal;
           
           if (isFinal && transcript) {
-            console.log(`\n📝 [Server:${guildId}] Google: "${transcript}"`);
-            handleRecognitionResult(transcript, guildId);
+            console.log(`\n📝 [${userName}] Google: "${transcript}"`);
+            handleRecognitionResult(transcript, guildId, userId, userName);
           } else if (transcript) {
-            process.stdout.write(`\r🎙️ "${transcript}"...          `);
+            process.stdout.write(`\r🎙️ [${userName}] "${transcript}"...          `);
           }
         }
       })
