@@ -39,6 +39,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Uploaded images (session ID filenames)
+uploads/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -46,5 +49,16 @@ __pycache__/
 *.so
 .Python
 venv/
+venv_new/
 env/
 ENV/
+
+# Large binaries / docker
+docker/
+docker.tgz
+*.deb
+
+# Credentials / secrets
+*credentials*.json
+*.pem
+!ssl/*.pem

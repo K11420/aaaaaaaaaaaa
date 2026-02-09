@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<!-- 経路検索システム template v2025.01 (ナビ画像・線の太さスライダー) -->
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>経路検索システム</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 20px; color: #333; }
+        
+        .main-layout { display: flex; gap: 20px; }
+        .main-content { flex: 1; }
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        .upload-area {
+            border: 2px dashed #999;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            background: #fff;
+            margin-bottom: 20px;
+        }
+        .upload-area:hover { border-color: #666; background: #fafafa; }
+        .upload-area input { display: none; }
+        
+        .controls { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+        button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #4CAF50; color: white; }
+        .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-secondary { background: #666; color: white; }
+        .btn-toggle { background: #9c27b0; color: white; }
+        
+        .status { display: flex; gap: 20px; margin-bottom: 10px; font-size: 14px; }
+        .status span { padding: 5px 10px; background: #e0e0e0; border-radius: 4px; }
+        
+        #canvas-container { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px; display: none; }
+        #canvas-container canvas { max-width: 100%; height: auto; cursor: crosshair; display: block; margin: 0 auto; }
+        
+        #result { margin-top: 20px; padding: 15px; background: #fff; border-radius: 8px; display: none; }
+        #result h3 { margin-bottom: 10px; font-size: 1rem; }
+        .stats { display: flex; gap: 20px; flex-wrap: wrap; }
+        .stat { padding: 10px; background: #f0f0f0; border-radius: 4px; }
+        .stat-value { font-size: 1.2rem; font-weight: bold; color: #4CAF50; }
+        .stat-label { font-size: 12px; color: #666; }
+        
+        #navigation { margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
+        .nav-step { display: flex; align-items: center; padding: 8px; margin: 5px 0; background: #f9f9f9; border-radius: 4px; border-left: 3px solid #4CAF50; }
+        .nav-step-num { width: 24px; height: 24px; background: #4CAF50; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; margin-right: 10px; }
+        
+        .loading { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; }
+        .loading-content { background: white; padding: 30px; border-radius: 8px; text-align: center; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #4CAF50; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .message { position: fixed; top: 20px; right: 20px; padding: 15px 20px; border-radius: 4px; color: white; z-index: 1001; }
+        .message-success { background: #4CAF50; }
+        .message-error { background: #f44336; }
+        
+        @media (max-width: 900px) { .main-layout { flex-direction: column-reverse; }  }
+    
+        /* タイマースタイル */
+        .timer-container {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .timer-display {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 3rem;
+            color: #00ff88;
+            text-shadow: 0 0 10px rgba(0,255,136,0.5);
+            margin-bottom: 15px;
+            letter-spacing: 3px;
+        }
+        .timer-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+        .timer-btn {
+            padding: 12px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .timer-btn-start {
+            background: linear-gradient(135deg, #00c853, #00e676);
+            color: white;
+        }
+        .timer-btn-start:hover { transform: scale(1.05); box-shadow: 0 4px 15px rgba(0,200,83,0.4); }
+        .timer-btn-stop {
+            background: linear-gradient(135deg, #ff5252, #ff1744);
+            color: white;
+        }
+        .timer-btn-stop:hover { transform: scale(1.05); box-shadow: 0 4px 15px rgba(255,82,82,0.4); }
+        .timer-btn-reset {
+            background: linear-gradient(135deg, #ff9800, #ffc107);
+            color: white;
+        }
+        .timer-btn-reset:hover { transform: scale(1.05); box-shadow: 0 4px 15px rgba(255,152,0,0.4); }
+        .timer-label {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>経路検索システム <span style="font-size:0.5em; color:#888; font-weight:normal;">template v2025.01</span></h1>
+        <div class="main-layout">
+            <div class="main-content">
+                <div class="upload-area" id="uploadArea">
+                    <input type="file" id="imageInput" accept="image/*">
+                    <p>クリックまたはドラッグ&ドロップで画像をアップロード</p>
+                </div>
+                <div class="controls" id="controls" style="display: none;">
+                    <div class="status">
+                        <span>開始点: <strong id="startStatus">未設定</strong></span>
+                        <span>終了点: <strong id="endStatus">未設定</strong></span>
+                    </div>
+                </div>
+                <div class="controls" id="buttons" style="display: none;">
+                    <button class="btn-primary" id="findPathBtn" disabled>経路検索</button>
+                    <button class="btn-secondary" id="clearBtn">リセット</button>
+                    <button class="btn-toggle" id="roadNetworkBtn" style="display: none;">道路表示 ON</button>
+                </div>
+                <div id="canvas-container"><canvas id="mainCanvas"></canvas></div>
+
+                <!-- タイマー -->
+                <div class="timer-container" id="timer-container" style="display: none;">
+                    <div class="timer-label">⏱️ ストップウォッチ</div>
+                    <div class="timer-display" id="timer-display">00:00:00</div>
+                    <div class="timer-buttons">
+                        <button class="timer-btn timer-btn-start" id="timer-start">▶ スタート</button>
+                        <button class="timer-btn timer-btn-stop" id="timer-stop">⏹ ストップ</button>
+                        <button class="timer-btn timer-btn-reset" id="timer-reset">↺ リセット</button>
+                    </div>
+                </div>
+
+                <div id="result">
+                    <h3>検索結果</h3>
+                    <div id="processingTimeDetails" style="display: none;"></div>
+                    <div class="stats">
+                        <div class="stat"><div class="stat-value" id="pathLength">-</div><div class="stat-label">経路長</div></div>
+                        <div class="stat"><div class="stat-value" id="processingTime">-</div><div class="stat-label">処理時間</div></div>
+                        <div class="stat"><div class="stat-value" id="algorithm">-</div><div class="stat-label">アルゴリズム</div></div>
+                    </div>
+                    <div id="navigation"></div>
+                    <!-- ナビゲーション画像（元画像＋経路・線の太さ変更可能） -->
+                    <div id="navigationImageSection" style="display:none; margin-top:16px; padding-top:16px; border-top:1px solid #eee;">
+                        <h4 style="margin-bottom:12px; font-size:1rem;">🗺️ ナビゲーション画像（アップロードしたカラー画像）</h4>
+                        <div style="margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                            <label style="font-weight:500;">経路の線の太さ:</label>
+                            <input type="range" id="navLineWidthSlider" min="1" max="20" value="4" style="width:140px; vertical-align:middle;">
+                            <input type="number" id="navLineWidthNumber" min="1" max="20" value="4" style="width:52px; padding:4px 8px; font-size:14px;">
+                            <span style="font-weight:bold; color:#d97706;">px</span>
+                        </div>
+                        <div style="background:#f0f0f0; border-radius:6px; padding:8px; overflow:auto;">
+                            <canvas id="navigationImageCanvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </div></div>
+        </div>
+    </div>
+    <div class="loading" id="loading"><div class="loading-content"><div class="spinner"></div><div id="loadingText">処理中...</div></div></div>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+    <script>
+        const app = {
+            imageData: null, grid: null, processedImage: null, startPoint: null, endPoint: null, detectedTexts: [],
+            clickMode: 'start', lastResult: null, roadNetworkData: null, showRoadNetwork: false,
+            navigationLineWidth: 4,
+            originalColorImage: null,
+            navImageData: null,
+            originalImageUrl: null,
+            init() { this.bindEvents(); const pathMatch = window.location.pathname.match(/^\/m\/([a-zA-Z0-9]+)$/i); if (pathMatch) { console.log('Session ID:', pathMatch[1]); this.loadSession(pathMatch[1]); } },
+            bindEvents() {
+                const uploadArea = document.getElementById('uploadArea');
+                const imageInput = document.getElementById('imageInput');
+                uploadArea.addEventListener('click', () => imageInput.click());
+                uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.style.borderColor = '#4CAF50'; });
+                uploadArea.addEventListener('dragleave', () => uploadArea.style.borderColor = '#999');
+                uploadArea.addEventListener('drop', e => { e.preventDefault(); uploadArea.style.borderColor = '#999'; if (e.dataTransfer.files[0]) this.handleFile(e.dataTransfer.files[0]); });
+                imageInput.addEventListener('change', e => { if (e.target.files[0]) this.handleFile(e.target.files[0]); });
+                document.getElementById('findPathBtn').addEventListener('click', () => this.findPath());
+                document.getElementById('clearBtn').addEventListener('click', () => this.clear());
+                document.getElementById('roadNetworkBtn').addEventListener('click', () => this.toggleRoadNetwork());
+                var self = this;
+                function applyNavLineWidth(v) {
+                    v = Math.max(1, Math.min(20, parseInt(v, 10) || 4));
+                    self.navigationLineWidth = v;
+                    var slider = document.getElementById('navLineWidthSlider');
+                    var num = document.getElementById('navLineWidthNumber');
+                    if (slider) slider.value = v;
+                    if (num) num.value = v;
+                    self.redrawNavigationImage();
+                }
+                var navSlider = document.getElementById('navLineWidthSlider');
+                var navNumber = document.getElementById('navLineWidthNumber');
+                if (navSlider) navSlider.addEventListener('input', function() { applyNavLineWidth(this.value); });
+                if (navNumber) navNumber.addEventListener('input', function() { applyNavLineWidth(this.value); });
+            },
+            async loadSession(sessionId) {
+                this.showLoading('読み込み中...');
+                try {
+                    const response = await axios.get('/api/session/' + sessionId);
+                    if (response.data.success) {
+                        this.grid = response.data.data.grid;
+                        this.processedImage = response.data.data.processed_image;
+                        this.imageData = response.data.data.original_image_base64 || null;
+                        this.originalColorImage = response.data.data.original_image_base64 || null;
+                        this.originalImageUrl = response.data.data.original_image_url || null;
+                        this.detectedTexts = response.data.data.detected_texts || [];
+                        console.log('Detected texts:', this.detectedTexts);
+                        this.displayImage();
+                    } else { this.showMessage('セッションが見つかりません', 'error'); window.location.href = '/'; }
+                } catch (error) { this.showMessage('読み込みエラー', 'error'); window.location.href = '/'; }
+                finally { this.hideLoading(); }
+            },
+            handleFile(file) { const reader = new FileReader(); reader.onload = e => { this.imageData = e.target.result; this.originalColorImage = e.target.result; this.processImage(); }; reader.readAsDataURL(file); },
+            async processImage() {
+                this.showLoading('画像を処理中...');
+                try {
+                    const response = await axios.post('/api/intelligent-process', { image_data: this.imageData, target_size: 600 });
+                    if (response.data.success) { window.location.href = '/m/' + response.data.session_id; }
+                    else { this.showMessage('処理失敗: ' + response.data.error, 'error'); }
+                } catch (error) { this.showMessage('エラー: ' + error.message, 'error'); }
+                finally { this.hideLoading(); }
+            },
+            displayImage() {
+                const container = document.getElementById('canvas-container'), canvas = document.getElementById('mainCanvas'), ctx = canvas.getContext('2d');
+                const img = new Image();
+                img.onload = () => { canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img, 0, 0); this.drawDetectedTexts(ctx); canvas.onclick = e => this.handleCanvasClick(e, canvas); container.style.display = 'block'; document.getElementById('controls').style.display = 'flex'; document.getElementById('buttons').style.display = 'flex'; timer.show(); document.getElementById('uploadArea').style.display = 'none'; };
+                img.src = this.processedImage;
+            },
+            handleCanvasClick(e, canvas) {
+                const rect = canvas.getBoundingClientRect(), scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+                const x = Math.floor((e.clientX - rect.left) * scaleX), y = Math.floor((e.clientY - rect.top) * scaleY);
+                if (x < 0 || x >= this.grid[0].length || y < 0 || y >= this.grid.length) return;
+                if (this.grid[y][x] === 1) { this.showMessage('通路部分をクリックしてください', 'error'); return; }
+                if (this.clickMode === 'start') { this.startPoint = { x, y }; this.clickMode = 'end'; document.getElementById('startStatus').textContent = '(' + x + ', ' + y + ')'; }
+                else { this.endPoint = { x, y }; this.clickMode = 'start'; document.getElementById('endStatus').textContent = '(' + x + ', ' + y + ')'; document.getElementById('findPathBtn').disabled = false; }
+                this.redraw();
+            },
+            redraw() {
+                const canvas = document.getElementById('mainCanvas'), ctx = canvas.getContext('2d');
+                const img = new Image();
+                img.onload = () => { ctx.drawImage(img, 0, 0); this.drawDetectedTexts(ctx); if (this.showRoadNetwork && this.roadNetworkData?.skeleton_image) { const skelImg = new Image(); skelImg.onload = () => { ctx.globalAlpha = 0.4; ctx.drawImage(skelImg, 0, 0, canvas.width, canvas.height); ctx.globalAlpha = 1.0; this.drawPointsAndPath(ctx); }; skelImg.src = this.roadNetworkData.skeleton_image; } else { this.drawPointsAndPath(ctx); } };
+                img.src = this.processedImage;
+            },
+            drawDetectedTexts(ctx) {
+                if (!this.detectedTexts || this.detectedTexts.length === 0) return;
+                
+                ctx.font = '11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                for (const t of this.detectedTexts) {
+                    const [cx, cy] = t.center;
+                    
+                    // 背景
+                    const textWidth = ctx.measureText(t.text).width;
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+                    ctx.fillRect(cx - textWidth/2 - 3, cy - 8, textWidth + 6, 16);
+                    
+                    // 枠線
+                    ctx.strokeStyle = '#2196F3';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(cx - textWidth/2 - 3, cy - 8, textWidth + 6, 16);
+                    
+                    // テキスト
+                    ctx.fillStyle = '#333';
+                    ctx.fillText(t.text, cx, cy);
+                }
+            },
+            drawPointsAndPath(ctx) {
+                if (this.lastResult?.path) { ctx.strokeStyle = '#FF9800'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(this.lastResult.path[0].x, this.lastResult.path[0].y); for (let i = 1; i < this.lastResult.path.length; i++) { ctx.lineTo(this.lastResult.path[i].x, this.lastResult.path[i].y); } ctx.stroke(); }
+                if (this.startPoint) { ctx.fillStyle = '#2196F3'; ctx.beginPath(); ctx.arc(this.startPoint.x, this.startPoint.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('S', this.startPoint.x, this.startPoint.y); }
+                if (this.endPoint) { ctx.fillStyle = '#f44336'; ctx.beginPath(); ctx.arc(this.endPoint.x, this.endPoint.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('E', this.endPoint.x, this.endPoint.y); }
+            },
+            async findPath() {
+                if (!this.startPoint || !this.endPoint) return;
+                this.showLoading('経路を検索中...');
+                try {
+                    var colorImg = this.originalColorImage || this.imageData;
+                    const response = await axios.post('/api/find-path', { grid: this.grid, start: this.startPoint, end: this.endPoint, algorithm: 'A*', original_image_base64: colorImg });
+                    if (response.data.success) {
+                        this.lastResult = response.data;
+                        this.navImageData = response.data.original_image_base64 || colorImg || null;
+                        if (response.data.original_image_base64) {
+                            this.imageData = response.data.original_image_base64;
+                            this.originalColorImage = response.data.original_image_base64;
+                        }
+                        this.roadNetworkData = response.data.road_network;
+                        this.displayResult(response.data);
+                        this.redraw();
+                        if (this.roadNetworkData?.skeleton_image) document.getElementById('roadNetworkBtn').style.display = 'block';
+                    }
+                    else { this.showMessage('経路が見つかりませんでした', 'error'); }
+                } catch (error) { this.showMessage('エラー: ' + error.message, 'error'); }
+                finally { this.hideLoading(); }
+            },
+            displayResult(data) {
+                document.getElementById('pathLength').textContent = data.path_length + 'ステップ';
+                document.getElementById('processingTime').textContent = data.processing_time.toFixed(0) + 'ms';
+                document.getElementById('algorithm').textContent = data.algorithm;
+                const navDiv = document.getElementById('navigation');
+                if (data.navigation_instructions?.length > 0) { navDiv.innerHTML = '<h4 style="margin-bottom:10px;">ナビゲーション</h4>' + data.navigation_instructions.map(inst => '<div class="nav-step"><div class="nav-step-num">' + inst.step + '</div><div>' + inst.instruction + '</div></div>').join(''); }
+                else { navDiv.innerHTML = ''; }
+                document.getElementById('result').style.display = 'block';
+                this.displayNavigationImage(data);
+            },
+            displayNavigationImage(data) {
+                var navImg = this.originalImageUrl || this.navImageData || this.originalColorImage || this.imageData;
+                if (!navImg || !data.path || data.path.length === 0 || !this.grid) return;
+                var sec = document.getElementById('navigationImageSection');
+                if (!sec) return;
+                var slider = document.getElementById('navLineWidthSlider');
+                var num = document.getElementById('navLineWidthNumber');
+                if (slider) slider.value = this.navigationLineWidth;
+                if (num) num.value = this.navigationLineWidth;
+                sec.style.display = 'block';
+                this.redrawNavigationImage();
+            },
+            redrawNavigationImage() {
+                var navImg = this.originalImageUrl || this.navImageData || this.originalColorImage || this.imageData;
+                if (!navImg || !this.lastResult || !this.lastResult.path || !this.grid) return;
+                const canvas = document.getElementById('navigationImageCanvas');
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                const gw = this.grid[0].length, gh = this.grid.length;
+                const img = new Image();
+                img.onload = () => {
+                    canvas.width = gw;
+                    canvas.height = gh;
+                    ctx.clearRect(0, 0, gw, gh);
+                    ctx.drawImage(img, 0, 0, gw, gh);
+                    ctx.strokeStyle = '#f59e0b';
+                    ctx.lineWidth = Math.max(1, this.navigationLineWidth - 9);
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.beginPath();
+                    ctx.moveTo(this.lastResult.path[0].x, this.lastResult.path[0].y);
+                    for (let i = 1; i < this.lastResult.path.length; i++) ctx.lineTo(this.lastResult.path[i].x, this.lastResult.path[i].y);
+                    ctx.stroke();
+                    ctx.fillStyle = '#3b82f6';
+                    ctx.beginPath();
+                    ctx.arc(this.lastResult.path[0].x, this.lastResult.path[0].y, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#ef4444';
+                    ctx.beginPath();
+                    ctx.arc(this.lastResult.path[this.lastResult.path.length - 1].x, this.lastResult.path[this.lastResult.path.length - 1].y, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                };
+                img.src = navImg;
+            },
+            toggleRoadNetwork() { this.showRoadNetwork = !this.showRoadNetwork; document.getElementById('roadNetworkBtn').textContent = this.showRoadNetwork ? '道路表示 OFF' : '道路表示 ON'; this.redraw(); },
+            clear() { this.startPoint = null; this.endPoint = null; this.clickMode = 'start'; this.lastResult = null; this.showRoadNetwork = false; document.getElementById('startStatus').textContent = '未設定'; document.getElementById('endStatus').textContent = '未設定'; document.getElementById('findPathBtn').disabled = true; document.getElementById('result').style.display = 'none'; document.getElementById('roadNetworkBtn').style.display = 'none'; var ns = document.getElementById('navigationImageSection'); if (ns) ns.style.display = 'none'; this.redraw(); },
+            showLoading(text) { document.getElementById('loadingText').textContent = text; document.getElementById('loading').style.display = 'flex'; },
+            hideLoading() { document.getElementById('loading').style.display = 'none'; },
+            showMessage(text, type) { const msg = document.createElement('div'); msg.className = 'message message-' + type; msg.textContent = text; document.body.appendChild(msg); setTimeout(() => msg.remove(), 3000); }
+        };
+        document.addEventListener('DOMContentLoaded', () => app.init());
+    
+        // タイマー機能
+        const timer = {
+            seconds: 0,
+            interval: null,
+            isRunning: false,
+            
+            init() {
+                document.getElementById('timer-start').addEventListener('click', () => this.start());
+                document.getElementById('timer-stop').addEventListener('click', () => this.stop());
+                document.getElementById('timer-reset').addEventListener('click', () => this.reset());
+            },
+            
+            start() {
+                if (this.isRunning) return;
+                this.isRunning = true;
+                this.interval = setInterval(() => {
+                    this.seconds++;
+                    this.updateDisplay();
+                }, 1000);
+            },
+            
+            stop() {
+                this.isRunning = false;
+                if (this.interval) {
+                    clearInterval(this.interval);
+                    this.interval = null;
+                }
+            },
+            
+            reset() {
+                this.stop();
+                this.seconds = 0;
+                this.updateDisplay();
+            },
+            
+            updateDisplay() {
+                const hrs = Math.floor(this.seconds / 3600);
+                const mins = Math.floor((this.seconds % 3600) / 60);
+                const secs = this.seconds % 60;
+                const display = 
+                    String(hrs).padStart(2, '0') + ':' + 
+                    String(mins).padStart(2, '0') + ':' + 
+                    String(secs).padStart(2, '0');
+                document.getElementById('timer-display').textContent = display;
+            },
+            
+            show() {
+                document.getElementById('timer-container').style.display = 'block';
+            }
+        };
+        
+        // 初期化時にタイマーも初期化
+        document.addEventListener('DOMContentLoaded', () => {
+            timer.init();
+        });
+
+    </script>
+</body>
+</html>
