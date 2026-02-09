@@ -58,7 +58,5 @@ docker/
 docker.tgz
 *.deb
 
-# Credentials / secrets
+# Credentials / secrets (keep .pem in repo if needed for SSL)
 *credentials*.json
-*.pem
-!ssl/*.pem
